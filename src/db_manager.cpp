@@ -16,81 +16,108 @@
 
 void DBManager::openDB(const std::string& dbname, bool withListener) {
     StopWatch sw;
-    sw.start(); // Start timing
+    sw.start();
 
     if (db_) {
-        spdlog::warn("DB is already open. Closing before reopening.");
+        spdlog::warn("DB already open, closing before reopening.");
         closeDB();
     }
 
-    rocksdb::Options options;
-    options.create_if_missing = true;
-    // options.disable_auto_compactions = true;
-    // options.compression = rocksdb::kNoCompression;
-    // options.num_levels = 1;
-    //limit number of keys per file
-    // options.target_file_size_base = 1000000;
-    //prio for compaction
-    options.compaction_pri = rocksdb::CompactionPri::kOldestSmallestSeqFirst; 
-
+    rocksdb::DBOptions dbOptions;
+    dbOptions.create_if_missing = true;
+    dbOptions.create_missing_column_families = true;
     if (withListener) {
-        options.listeners.emplace_back(std::make_shared<CompactionEventListener>());
+        dbOptions.listeners.emplace_back(std::make_shared<CompactionEventListener>());
     }
 
+    // Define 5 hardcoded column families
+    std::vector<std::string> cf_names = {"default", "phone", "mail", "address", "name", "surname"};
+    std::vector<rocksdb::ColumnFamilyDescriptor> cf_descriptors;
+    for (const auto& name : cf_names) {
+        cf_descriptors.emplace_back(name, rocksdb::ColumnFamilyOptions());
+    }
+
+    std::vector<rocksdb::ColumnFamilyHandle*> cf_handles_raw;
     rocksdb::DB* rawDbPtr = nullptr;
-    auto status = rocksdb::DB::Open(options, dbname, &rawDbPtr);
+
+    auto status = rocksdb::DB::Open(dbOptions, dbname, cf_descriptors, &cf_handles_raw, &rawDbPtr);
     if (!status.ok()) {
-        throw std::runtime_error("Failed to open DB: " + status.ToString());
+        throw std::runtime_error("Failed to open DB with Column Families: " + status.ToString());
     }
 
     db_.reset(rawDbPtr);
 
-    sw.stop(); // Stop timing
-    spdlog::critical("RocksDB opened at path: {} (withListener={}), took {} µs",
-                 dbname, withListener ? "true" : "false", sw.elapsedMicros());
-}
-
-
-void DBManager::insertRecords(int numRecords) {
-    StopWatch sw;
-    sw.start();
-
-    if (!db_) {
-        throw std::runtime_error("Cannot insert: DB is not open. Call openDB() first.");
-    }
-
-    for (int i = 0; i < numRecords; ++i) {
-        // Minimal debug
-        if (i % 500000 == 0) {
-            spdlog::debug("Inserted {} records so far...", i);
-        }
-
-        const std::string key   = "key" + std::to_string(i);
-        // const std::string value = "value" + std::to_string(i);
-        //make value 1000 characters long
-        const std::string value = "value" + std::to_string(i) + std::string(1000, 'a');
-
-        auto s = db_->Put(rocksdb::WriteOptions(), key, value);
-        if (!s.ok()) {
-            throw std::runtime_error("RocksDB Put failed: " + s.ToString());
-        }
-    }
-
-    auto flushStatus = db_->Flush(rocksdb::FlushOptions());
-    if (!flushStatus.ok()) {
-        throw std::runtime_error("RocksDB flush failed: " + flushStatus.ToString());
+    // Store ColumnFamilyHandles in a map for easy access
+    cf_handles_.clear();
+    for (size_t i = 0; i < cf_names.size(); ++i) {
+        cf_handles_[cf_names[i]].reset(cf_handles_raw[i]);
     }
 
     sw.stop();
-    spdlog::critical("Successfully inserted {} records (took {} µs).",
-                 numRecords, sw.elapsedMicros());
-
-    //manual compaction
-    auto compactionStatus = db_->CompactRange(rocksdb::CompactRangeOptions(), nullptr, nullptr);
-    if (!compactionStatus.ok()) {
-        throw std::runtime_error("RocksDB compaction failed: " + compactionStatus.ToString());
-    }
+    spdlog::critical("RocksDB opened at path: {} with CFs, took {} µs",
+                     dbname, sw.elapsedMicros());
 }
+
+
+
+void DBManager::insertRecords(int numRecords) {
+    if (!db_) throw std::runtime_error("DB not open.");
+
+    StopWatch sw;
+    sw.start();
+
+    std::vector<std::string> columns = {"phone", "mail", "address", "name", "surname"};
+
+    rocksdb::WriteBatch batch;
+    for (int i = 0; i < numRecords; ++i) {
+        const std::string key = "key" + std::to_string(i);
+        for (const auto& column : columns) {
+            const std::string value = column + "_value" + std::to_string(i) + std::string(1000, 'a');
+            auto handle = cf_handles_.at(column).get();
+            batch.Put(handle, key, value);
+        }
+
+        if (i % 500000 == 0) {
+            auto s = db_->Write(rocksdb::WriteOptions(), &batch);
+            if (!s.ok()) throw std::runtime_error("Batch write failed: " + s.ToString());
+            batch.Clear();
+            spdlog::debug("Inserted {} records...", i);
+        }
+    }
+
+    if (batch.Count() > 0) {
+        auto s = db_->Write(rocksdb::WriteOptions(), &batch);
+        if (!s.ok()) throw std::runtime_error("Final batch write failed: " + s.ToString());
+    }
+
+    db_->Flush(rocksdb::FlushOptions());
+
+    sw.stop();
+    spdlog::critical("Inserted {} records across CFs in {} µs.", numRecords, sw.elapsedMicros());
+
+    db_->CompactRange(rocksdb::CompactRangeOptions(), nullptr, nullptr);
+}
+
+std::vector<std::string> DBManager::scanSSTFilesForColumn(const std::string& dbname, const std::string& column) {
+    if (!db_) throw std::runtime_error("DB not open.");
+    if (cf_handles_.find(column) == cf_handles_.end())
+        throw std::runtime_error("Unknown Column Family: " + column);
+
+    rocksdb::ColumnFamilyMetaData meta;
+    db_->GetColumnFamilyMetaData(cf_handles_[column].get(), &meta);
+
+    std::vector<std::string> sst_files;
+    for (const auto& level : meta.levels) {
+        for (const auto& file : level.files) {
+            // skip "/" in filename (first character)
+            sst_files.push_back(dbname + file.name);
+        }
+    }
+
+    spdlog::info("Column {} has {} SST files.", column, sst_files.size());
+    return sst_files;
+}
+
 
 std::vector<std::string> DBManager::scanSSTFiles(const std::string& dbname) {
     StopWatch sw;
@@ -233,13 +260,15 @@ void DBManager::closeDB() {
     sw.start();
 
     if (db_) {
+        cf_handles_.clear();  // Automatically deletes handles
         db_.reset();
-        spdlog::debug("DB closed.");
+        spdlog::debug("DB closed with Column Families.");
     }
 
     sw.stop();
     spdlog::critical("closeDB took {} µs.", sw.elapsedMicros());
 }
+
 
 bool DBManager::ScanFileForValue(const std::string& filename, const std::string& value) {
     StopWatch sw;
@@ -274,4 +303,35 @@ bool DBManager::ScanFileForValue(const std::string& filename, const std::string&
     spdlog::critical("ScanFileForValue({}) did not find value. Took {} µs.",
                   filename, sw.elapsedMicros());
     return false;
+}
+
+// In DBManager class
+bool DBManager::checkValueAcrossHierarchies( bloomTree& hierarchy1, const std::string& value1,
+     bloomTree& hierarchy2, const std::string& value2) {
+StopWatch sw;
+sw.start();
+
+auto candidates1 = hierarchy1.checkExistance(value1);
+auto candidates2 = hierarchy2.checkExistance(value2);
+
+std::unordered_set<std::string> setCandidates2(candidates2.begin(), candidates2.end());
+
+// Find intersection between candidates
+for (const auto& candidate : candidates1) {
+if (setCandidates2.count(candidate)) {
+// Confirm existence in both hierarchies
+bool foundValue1 = ScanFileForValue(candidate, value1);
+bool foundValue2 = ScanFileForValue(candidate, value2);
+
+if (foundValue1 && foundValue2) {
+sw.stop();
+spdlog::critical("checkValueAcrossHierarchies found both values in {} µs.", sw.elapsedMicros());
+return true;
+}
+}
+}
+
+sw.stop();
+spdlog::critical("checkValueAcrossHierarchies did not find both values in {} µs.", sw.elapsedMicros());
+return false;
 }

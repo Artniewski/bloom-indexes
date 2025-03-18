@@ -17,6 +17,7 @@ class bloomTree {
    
  public:
     bloomTree(int ratio);
+    bloomTree() : ratio(3) {}
     std::vector<std::string> bloomNames;
     void createLeafLevel(bloom_value bv, std::string filename);
     void createTree();
