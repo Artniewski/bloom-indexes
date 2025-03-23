@@ -1,68 +1,42 @@
 #ifndef DB_MANAGER_HPP
 #define DB_MANAGER_HPP
 
-#include <string>
-#include <vector>
-#include <memory>
 #include <rocksdb/db.h>
 #include <rocksdb/sst_file_reader.h>
+
+#include <memory>
+#include <string>
+#include <vector>
+
 #include "bloomTree.hpp"
 
-/**
- * @brief A class to manage RocksDB operations such as creating, inserting, and scanning for SST files.
- */
-class DBManager
-{
-public:
-    /**
-     * @brief Opens a RocksDB database at the given path.
-     *        Optionally attaches a compaction listener.
-     *
-     * @param dbname Path to the RocksDB database folder.
-     * @param withListener If true, attach a compaction event listener.
-     * @throw std::runtime_error if opening fails.
-     */
+class DBManager {
+   public:
     void openDB(const std::string &dbname, bool withListener = false);
-
-    /**
-     * @brief Inserts `numRecords` into the database. Example: key = "key{i}", value = "value{i}".
-     */
-    void insertRecords(int numRecords);
-
-    /**
-     * @brief Returns a list of all .sst files in the database directory.
-     */
-    std::vector<std::string> scanSSTFiles(const std::string &dbname);
-    std::vector<std::string> scanSSTFilesForColumn(const std::string& dbname, const std::string& column);
-
-    /**
-     * @brief Checks whether the database is currently open.
-     */
+    void insertRecords(int numRecords, std::vector<std::string> columns);
+    std::vector<std::string> scanSSTFilesForColumn(const std::string &dbname, const std::string &column);
     bool isOpen() const { return static_cast<bool>(db_); }
-
-    /**
-     * @brief Closes the currently open database (if any).
-     *        This sets the unique_ptr to nullptr.
-     */
     void closeDB();
-
-    bool checkValueInHierarchy(bloomTree &hierarchy, const std::string &value);
-    bool checkValueInHierarchyWithoutConcurrency(bloomTree &hierarchy, const std::string &value);
-
     bool checkValueWithoutBloomFilters(const std::string &value);
     bool ScanFileForValue(const std::string &filename, const std::string &value);
-    
-    
-    bool checkValueAcrossHierarchies( bloomTree &hierarchy1, const std::string &value1,
-                                      bloomTree &hierarchy2, const std::string &value2);
+    bool findRecordInHierarchy(BloomTree &hierarchy, const std::string &value,
+                               const std::string &startKey = "", const std::string &endKey = "");
 
-private:
+    bool checkValueAcrossHierarchies(BloomTree &hierarchy1, const std::string &value1,
+                                     BloomTree &hierarchy2, const std::string &value2);
+    bool noBloomCheckRecordWithTwoColumns(const std::string &column1, const std::string &value1,
+                                          const std::string &column2, const std::string &value2);
+    bool noBloomcheckValueInColumn(const std::string &column, const std::string &value);
+    bool findRecordInHierarchies(BloomTree &hierarchy1, const std::string &value1,
+                                 BloomTree &hierarchy2, const std::string &value2);
+
+   private:
+    std::unordered_set<std::string> scanFileForKeysWithValue(const std::string &filename, const std::string &value,
+                                                             const std::string &rangeStart, const std::string &rangeEnd);
     // A custom deleter for RocksDB to ensure we call 'delete db_' properly.
-    struct RocksDBDeleter
-    {
-        void operator()(rocksdb::DB *dbPtr) const
-        {
-            delete dbPtr; // Safe to call delete on a nullptr
+    struct RocksDBDeleter {
+        void operator()(rocksdb::DB *dbPtr) const {
+            delete dbPtr;  // Safe to call delete on a nullptr
         }
     };
 
@@ -71,4 +45,4 @@ private:
     std::unordered_map<std::string, std::unique_ptr<rocksdb::ColumnFamilyHandle>> cf_handles_;
 };
 
-#endif // DB_MANAGER_HPP
+#endif  // DB_MANAGER_HPP

@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.10)
 project(HierarchicalDB)
 
 # Set C++ standard and optimization flags
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Include paths
@@ -28,10 +28,10 @@ set(SOURCES
     src/compaction_event_listener.cpp
     src/main.cpp
     src/TestRunner.cpp
-    src/partition_manager.cpp
     bloom/bloomTree.cpp
     bloom/bloom_value.cpp
     bloom/node.cpp
+    bloom/MurmurHash3.cpp
 )
 
 # Add executable

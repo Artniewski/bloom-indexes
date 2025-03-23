@@ -1,97 +1,100 @@
-#include <iostream>
-#include <string>
-#include <vector>
-#include <map>
-
-#include "db_manager.hpp"
-#include "bloom_manager.hpp"
-#include "bloomTree.hpp"
-#include "partition_manager.hpp"
-
 #include <spdlog/spdlog.h>
-#include <thread>
+
 #include <chrono>
+#include <iostream>
+#include <map>
+#include <string>
+#include <thread>
+#include <vector>
+
+#include "bloomTree.hpp"
+#include "bloom_manager.hpp"
+#include "db_manager.hpp"
+#include "stopwatch.hpp"
 
 struct TestParams {
-    std::string dbNameBase;
-    bool withListener;
+    std::string dbName;
+    bool compactionLogging;
     int numRecords;
-    int ratio;
+    int bloomTreeRatio;
     int numberOfAttempts;
-    int percentageToCheck;
+    double bloomFalsePositiveRate;
+    size_t itemsPerPartition;
+    size_t bloomSize;
+    int numHashFunctions;
 };
 
-void runColumnTest(const TestParams& params, int attemptIndex) {
-    std::string dbName = params.dbNameBase + std::to_string(attemptIndex);
-
+void runColumnTest(const TestParams& params, int attemptIndex,
+                   const std::string& column1, const std::string& value1,
+                   const std::string& column2, const std::string& value2) {
+    auto dbName = params.dbName + "_" + std::to_string(attemptIndex);
     DBManager dbManager;
     BloomManager bloomManager;
+    // const std::vector<std::string> columns = {"phone", "mail", "address", "name", "surname"};
+    const std::vector<std::string> columns = {"phone", "mail","name"};
 
-    dbManager.openDB(dbName, params.withListener);
-    dbManager.insertRecords(params.numRecords);
+    dbManager.openDB(dbName, params.compactionLogging);
+    dbManager.insertRecords(params.numRecords, columns);
+    std::this_thread::sleep_for(std::chrono::seconds(5));
 
-    std::this_thread::sleep_for(std::chrono::seconds(15));
-
-    std::vector<std::string> columns = {"phone", "mail", "address", "name", "surname"};
-    std::map<std::string, bloomTree> hierarchies;
-
+    std::map<std::string, BloomTree> hierarchies;
     for (const auto& column : columns) {
         auto sstFiles = dbManager.scanSSTFilesForColumn(dbName, column);
-        bloomManager.createBloomValuesForSSTFiles(sstFiles);
+        BloomTree hierarchy = bloomManager.createPartitionedHierarchy(sstFiles, params.itemsPerPartition,
+                                                                      params.bloomSize, params.bloomTreeRatio,
+                                                                      params.numHashFunctions);
 
-        bloomTree hierarchy(params.ratio);
-        bloomManager.createHierarchy(sstFiles, hierarchy);
-        hierarchies[column] = hierarchy;
+        hierarchies.try_emplace(column, std::move(hierarchy));
 
-        spdlog::info("Hierarchy created for column: {}", column);
+        spdlog::info("Hierarchy built for column: {}", column);
     }
 
-    std::this_thread::sleep_for(std::chrono::seconds(3));
+    dbManager.noBloomCheckRecordWithTwoColumns(column1, value1, column2, value2);
 
-    // Example individual column search
-        // const std::string value = column + "_value" + std::to_string(i) + std::string(1000, 'a');
+    dbManager.findRecordInHierarchy(hierarchies.at(column1), value1);
+    dbManager.findRecordInHierarchy(hierarchies.at(column2), value2);
 
-    std::string valuePhone = "phone_value456" + std::string(1000, 'a');
-    bool foundPhone = dbManager.checkValueInHierarchy(hierarchies["phone"], valuePhone);
-    spdlog::info(foundPhone ? "[Info] Value found in phone hierarchy."
-                            : "[Info] Value not found in phone hierarchy.");
-
-    // Multi-column search example
-    std::string valueName = "namevalue456"+ std::string(1000, 'a');
-
-    bool foundInBoth = dbManager.checkValueAcrossHierarchies(
-        hierarchies["phone"], valuePhone, hierarchies["name"], valueName);
-
-    spdlog::info(foundInBoth ? "[Info] Record with specified phone and name found."
-                             : "[Info] Record with specified phone and name not found.");
+    dbManager.findRecordInHierarchies(hierarchies.at(column1), value1, hierarchies.at(column2), value2);
 
     dbManager.closeDB();
 }
 
-void runAllAttempts(const TestParams& params) {
-    for (int i = 1; i <= params.numberOfAttempts; ++i) {
-        spdlog::info("--- Running column-based attempt {}/{} with ratio={}, numRecords={} ---",
-                     i, params.numberOfAttempts, params.ratio, params.numRecords);
-        runColumnTest(params, i);
-    }
-}
-
 int main() {
     try {
-        spdlog::set_level(spdlog::level::debug);
+        spdlog::set_level(spdlog::level::info);
 
-        std::vector<TestParams> testSets = {
-            {"branch_columns_", true, 1000000, 3, 1, 80}
-        };
+        //     std::string dbName;
+        //    bool compactionLogging;
+        //     int numRecords;
+        //     int bloomTreeRatio;
+        //     int numberOfAttempts;
+        //     double bloomFalsePositiveRate;
+        //     size_t itemsPerPartition;
+        //     size_t bloomSize;
+        //     int numHashFunctions;
+        TestParams params{
+            "column_db_test",
+            false,
+            1'000'000,
+            3,
+            1,
+            0.01,
+            100'000,
+            1'000'000,
+            6};
 
-        for (auto& t : testSets) {
-            runAllAttempts(t);
-        }
+        const std::string column1 = "phone";
+        const std::string value1 = column1 + "_value654321" + std::string(1000, 'a');
+
+        const std::string column2 = "name";
+        const std::string value2 = column2 + "_value654321" + std::string(1000, 'a');
+
+        runColumnTest(params, 1, column1, value1, column2, value2);
 
     } catch (const std::exception& e) {
-        std::cerr << "[Error] " << e.what() << "\n";
-        return 1;
+        spdlog::error("[Error] {}", e.what());
+        return EXIT_FAILURE;
     }
 
-    return 0;
+    return EXIT_SUCCESS;
 }

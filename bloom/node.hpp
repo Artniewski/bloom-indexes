@@ -1,29 +1,22 @@
 #pragma once
-
-#include <bitset>
-#include <fstream>
-#include <iostream>
+#include <memory>
 #include <string>
 #include <vector>
 
 #include "bloom_value.hpp"
 
-class node {
- public:
-
-    std::vector<node*> children;
-    bloom_value blValue;
+class Node {
+   public:
+    std::vector<std::unique_ptr<Node>> children;
+    BloomFilter bloom;
     std::string filename;
+    std::string startKey;
+    std::string endKey;
 
-    node(bloom_value bv, std::string filename){
-        this->blValue= bv;
-        this->filename=filename;
-    }
+    Node(BloomFilter bf, std::string fname, std::string start, std::string end)
+        : bloom(std::move(bf)), filename(std::move(fname)), startKey(std::move(start)), endKey(std::move(end)) {}
 
-    node()
-    {
-       filename="Memory";
-    }
-
-    void addchildren(int pos, int ratio, std::vector<node*> nodes);
+    Node(size_t bloomSize, double falsePositiveRate)
+        : filename("Memory"), bloom(bloomSize, falsePositiveRate) {}
+    
 };

@@ -1,59 +1,67 @@
 #include "bloom_manager.hpp"
-#include "bloom_value.hpp"
-#include <rocksdb/options.h>
+
 #include <rocksdb/sst_file_reader.h>
-#include <rocksdb/status.h>
-#include <stdexcept>
 #include <spdlog/spdlog.h>
 
+#include "bloom_value.hpp"
+#include "bloomTree.hpp"
 
-void BloomManager::createBloomValuesForSSTFiles(const std::vector<std::string>& sstFiles) {
+BloomTree BloomManager::createPartitionedHierarchy(const std::vector<std::string>& sstFiles,
+                                              size_t partitionSize,
+                                              size_t bloomSize,
+                                              int numHashFunctions,
+                                              int branchingRatio) {
+    BloomTree hierarchy(branchingRatio, bloomSize, numHashFunctions);
+
     for (const auto& sstFile : sstFiles) {
-        bloom_value filter;
-
-        // Open SST file and populate the Bloom filter
         rocksdb::Options options;
         rocksdb::SstFileReader reader(options);
         auto status = reader.Open(sstFile);
         if (!status.ok()) {
-            spdlog::error("Failed to open SSTable: {}", status.ToString());
+            spdlog::error("Cannot open SST file: {}", sstFile);
             continue;
         }
 
         auto iter = reader.NewIterator(rocksdb::ReadOptions());
+
+        size_t currentCount = 0;
+        BloomFilter partitionBloom(bloomSize, numHashFunctions);
+        std::string partitionStartKey;
+        bool firstEntry = true;
+        std::string lastKey;
+
         for (iter->SeekToFirst(); iter->Valid(); iter->Next()) {
-            filter.insert(iter->value().ToString());
+            std::string key = iter->key().ToString();
+            std::string value = iter->value().ToString();
+
+            if (firstEntry) {
+                partitionStartKey = key;
+                firstEntry = false;
+            }
+
+            partitionBloom.insert(value);
+            lastKey = key;
+            currentCount++;
+
+            if (currentCount >= partitionSize) {
+                hierarchy.addLeafNode(std::move(partitionBloom), sstFile, partitionStartKey, lastKey);
+
+                // Reset for next partition
+                partitionBloom = BloomFilter(bloomSize, numHashFunctions);
+                currentCount = 0;
+                firstEntry = true;
+            }
         }
+
+        // Add remaining entries as a final partition
+        if (currentCount > 0) {
+            hierarchy.addLeafNode(std::move(partitionBloom), sstFile, partitionStartKey, lastKey);
+        }
+
         delete iter;
-
-        // Save Bloom filter to file
-        std::string bloomFile = sstFile + ".bloom";
-        filter.saveToFile(bloomFile);
-        spdlog::debug("Created Bloom filter for {}  -> {} \n", sstFile, bloomFile);
     }
-}
 
-void BloomManager::createHierarchy(const std::vector<std::string>& sstFiles, bloomTree& hierarchy) {
-    for (const auto& sstFile : sstFiles) {
-        std::string bloomFile = sstFile + ".bloom";
-        bloom_value filter = filter.loadFromFile(bloomFile);
-        hierarchy.createLeafLevel(filter, sstFile);
-    }
-    hierarchy.createTree();
-    spdlog::debug("Bloom filter hierarchy created successfully.");
-}
-
-void BloomManager::createPartitionedHierarchy(const std::vector<std::pair<std::string, std::vector<Partition>>>& partitionedSSTFiles,
-                                                bloomTree & hierarchy) {
-    for (const auto & fileAndPartitions : partitionedSSTFiles) {
-        const std::string & sstFile = fileAndPartitions.first;
-        for (const auto & part : fileAndPartitions.second) {
-            // Build an identifier string in the format:
-            //    sstFileName[startKey,endKey]
-            std::string id = sstFile + "[" + part.start_key + "," + (part.end_key.empty() ? "EOF" : part.end_key) + "]";
-            hierarchy.createLeafLevel(part.bloom, id);
-        }
-    }
-    hierarchy.createTree();
-    spdlog::debug("Partitioned bloom filter hierarchy created successfully.");
+    hierarchy.buildTree();
+    spdlog::info("Bloom hierarchy successfully built from partitions.");
+    return hierarchy;
 }

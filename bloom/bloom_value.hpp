@@ -1,23 +1,26 @@
 #pragma once
 
-#include <bitset>
+#include <cmath>
 #include <fstream>
-#include <iostream>
 #include <string>
 #include <vector>
 
+class BloomFilter {
+   private:
+    std::vector<bool> bitArray;
 
-class bloom_value {
- private:
-  int numHashFunctions=3;
+    size_t hash(const std::string& key, int seed) const;
 
- public:
-  std::bitset<2000000> bitArray;  
-  bloom_value() {}
-  void insert(const std::string& key);
-  void saveToFile(const std::string& filename);
-  void createFile(const std::string& filename);
-  bloom_value loadFromFile(const std::string& filename);
-  bool exists(const std::string& key) const;
-  bool exists(const std::string key[]) const;
+   public:
+    int numHashFunctions;
+    size_t bitArraySize;
+    //  for future use
+    // BloomFilter(size_t expectedItems, double falsePositiveRate);
+    BloomFilter(size_t size, double numHashFunctions);
+    void insert(const std::string& key);
+    bool exists(const std::string& key) const;
+    void merge(const BloomFilter& other);
+
+    void saveToFile(const std::string& filename) const;
+    static BloomFilter loadFromFile(const std::string& filename);
 };

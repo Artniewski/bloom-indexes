@@ -1,98 +1,89 @@
 #include "bloom_value.hpp"
+#include <iostream>
 
-void bloom_value::insert(const std::string& key) {
-  // Hash key using multiple hash functions and set corresponding bits
-  // This is a simplified example, actual hashing functions would need to be
-  // implemented
-  for (int i = 0; i < numHashFunctions; ++i) {
-    size_t hash = std::hash<std::string>{}(key + std::to_string(i));
-    // print setting hahs bit
-    // std::cout << "Setting bit: " << hash % bitArray.size() << std::endl;
-    bitArray.set(hash % bitArray.size(), true);
-  }
+#include <stdexcept>
+
+#include "MurmurHash3.h"
+
+// BloomFilter::BloomFilter(size_t expectedItems, double falsePositiveRate) {
+//     double ln2 = std::log(2.0);
+//     bitArraySize = static_cast<size_t>(-(expectedItems * std::log(falsePositiveRate)) / (ln2 * ln2));
+//     numHashFunctions = static_cast<int>(std::round((bitArraySize / expectedItems) * ln2));
+//     bitArray.resize(bitArraySize, false);
+// }
+
+BloomFilter::BloomFilter(size_t size, double numHashFunctions) : bitArraySize(size), numHashFunctions(numHashFunctions) {
+    bitArray.resize(bitArraySize, false);
 }
 
-void bloom_value::saveToFile(const std::string& filename) {
-  std::ofstream file(filename, std::ios::binary);
-  if (!file) {
-    std::cerr << "Error opening file: " << filename << std::endl;
-    return;
-  }
-
-  // Write the number of hash functions used
-  file.write(reinterpret_cast<const char*>(&numHashFunctions),
-             sizeof(numHashFunctions));
-
-  // Write the bit array
-  std::vector<char> buffer((bitArray.size() + 7) /
-                           8);  // Convert bitset to byte array
-  for (size_t i = 0; i < bitArray.size(); ++i) {
-    buffer[i / 8] |= bitArray[i] << (i % 8);
-  }
-  file.write(buffer.data(), buffer.size());
-
-  file.close();
+size_t BloomFilter::hash(const std::string& key, int seed) const {
+    uint32_t hashOutput;
+    MurmurHash3_x86_32(key.c_str(), key.size(), seed, &hashOutput);
+    return static_cast<size_t>(hashOutput) % bitArraySize;
 }
 
-bloom_value bloom_value::loadFromFile(const std::string& filename) {
-  
-  std::ifstream file(filename, std::ios::binary);
-
-  if (!file) {
-    throw std::runtime_error("Error opening file: " + filename);
-  }
-
-  // Read the number of hash functions used
-  int numHashFunctions;
-  file.read(reinterpret_cast<char*>(&numHashFunctions),
-            sizeof(numHashFunctions));
-
-   // Read the bit array
-  std::vector<char> buffer((bitArray.size() + 7) /
-                           8);  // Assuming the same size as saved in saveToFile
-  file.read(buffer.data(), buffer.size());
-
-  bloom_value filter;
-
-  // Convert byte array to bitset
-  for (size_t i = 0; i < filter.bitArray.size(); ++i) {
-    filter.bitArray[i] = (buffer[i / 8] >> (i % 8)) & 1;
-  }
-
-  file.close();
-
-  return filter;
-}
-
-
-void bloom_value::createFile(const std::string& filename) {
-  std::ofstream file(filename, std::ios::binary);
-  if (!file) {
-    std::cerr << "Error opening file: " << filename << std::endl;
-    return;
-  }
-}
-
-
-// Checks if at least one element in key[] exists in Bloom filter 
-bool bloom_value::exists(const std::string key[]) const {
-
-  for (size_t i=0; i<key->length(); i++) {
-    if (exists(key[i]))
-      return true;
-  }
-  return false;
-
-}
-
-bool bloom_value::exists(const std::string& key) const {
-  // Check if all bits corresponding to the key are set
-  for (int i = 0; i < numHashFunctions; ++i) {
-    size_t hash = std::hash<std::string>{}(key + std::to_string(i));
-    if (!bitArray[hash % bitArray.size()]) {
-      return false;  // If any bit is not set, the element definitely doesn't
-                     // exist
+void BloomFilter::insert(const std::string& key) {
+    for (int i = 0; i < numHashFunctions; ++i) {
+        bitArray[hash(key, i)] = true;
     }
-  }
-  return true;  // If all bits are set, the element might exist
-};
+}
+
+bool BloomFilter::exists(const std::string& key) const {
+    for (int i = 0; i < numHashFunctions; ++i) {
+        if (!bitArray[hash(key, i)]) {
+            return false;
+        }
+    }
+    return true;
+}
+
+void BloomFilter::merge(const BloomFilter& other) {
+    if (bitArray.size() != other.bitArray.size()) {
+      std::cout << "bitArray.size() " << bitArray.size() << " other.bitArray.size() " << other.bitArray.size() << std::endl;
+
+        throw std::runtime_error("BloomFilter size mismatch during merge");
+    }
+    for (size_t i = 0; i < bitArray.size(); ++i) {
+        bitArray[i] = bitArray[i] | other.bitArray[i];
+    }
+}
+
+void BloomFilter::saveToFile(const std::string& filename) const {
+    std::ofstream file(filename, std::ios::binary);
+    if (!file) throw std::runtime_error("Error opening file: " + filename);
+
+    file.write(reinterpret_cast<const char*>(&bitArraySize), sizeof(bitArraySize));
+    file.write(reinterpret_cast<const char*>(&numHashFunctions), sizeof(numHashFunctions));
+
+    size_t byteSize = (bitArraySize + 7) / 8;
+    std::vector<char> buffer(byteSize, 0);
+    for (size_t i = 0; i < bitArraySize; ++i) {
+        if (bitArray[i]) buffer[i / 8] |= (1 << (i % 8));
+    }
+    file.write(buffer.data(), buffer.size());
+}
+
+BloomFilter BloomFilter::loadFromFile(const std::string& filename) {
+    std::ifstream file(filename, std::ios::binary);
+    if (!file) throw std::runtime_error("Error opening file: " + filename);
+
+    size_t bitArraySize;
+    int numHashFunctions;
+    file.read(reinterpret_cast<char*>(&bitArraySize), sizeof(bitArraySize));
+    file.read(reinterpret_cast<char*>(&numHashFunctions), sizeof(numHashFunctions));
+
+    BloomFilter filter(1, 0.01);  // Temporary dummy values
+    filter.bitArraySize = bitArraySize;
+    filter.numHashFunctions = numHashFunctions;
+    filter.bitArray.resize(bitArraySize);
+
+    size_t byteSize = (bitArraySize + 7) / 8;
+    std::vector<char> buffer(byteSize);
+    file.read(buffer.data(), buffer.size());
+
+    for (size_t i = 0; i < bitArraySize; ++i) {
+        filter.bitArray[i] = buffer[i / 8] & (1 << (i % 8));
+    }
+
+    return filter;
+}

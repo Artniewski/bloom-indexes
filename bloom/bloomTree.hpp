@@ -1,30 +1,52 @@
 #pragma once
+#include <memory>
+#include <vector>
 
-#include <cmath>
 #include "node.hpp"
 
-
-class bloomTree {
- 
- private: 
+class BloomTree {
+   private:
+    std::unique_ptr<Node> root;
     int ratio;
-    node *root;
-    std::vector<node*> leafnodes;
-    void createLevel(std::vector<node*> nodes);
-    void traverse(node* node);
-    void checkExistance(node* node, std::string value);
-    int foundInHierarchy=0;
-   
- public:
-    bloomTree(int ratio);
-    bloomTree() : ratio(3) {}
-    std::vector<std::string> bloomNames;
-    void createLeafLevel(bloom_value bv, std::string filename);
-    void createTree();
-    std::vector<std::string> checkExistance(std::string value);
-    int GetScannedHierarchyFilters();
-    // print tree
-    void printTree() {
-         traverse(root);
-    }
+    size_t bloomSize;
+    int numHashFunctions;
+
+    // for future use
+    //  size_t expectedItems;
+    //  double bloomFalsePositiveRate;
+
+    void buildLevel(std::vector<std::unique_ptr<Node>>& nodes);
+    void search(Node* node, const std::string& value,
+                const std::string& qStart, const std::string& qEnd,
+                std::vector<std::string>& results) const;
+
+    void searchNodes(Node* node, const std::string& value,
+                     const std::string& qStart, const std::string& qEnd,
+                     std::vector<const Node*>& results) const;
+
+   public:
+    // for future use
+    //   BloomTree(int branchingRatio, size_t expectedItems, double bloomFalsePositiveRate)
+    //       : ratio(branchingRatio),
+    //       expectedItems(expectedItems),
+    //         bloomFalsePositiveRate(bloomFalsePositiveRate) {}
+    BloomTree(int branchingRatio, size_t bloomSize, int numHashFunctions)
+        : ratio(branchingRatio),
+          bloomSize(bloomSize),
+          numHashFunctions(numHashFunctions) {}
+
+    std::vector<std::unique_ptr<Node>> leafNodes;
+
+    void addLeafNode(BloomFilter&& bv, const std::string& file,
+                     const std::string& start, const std::string& end);
+
+    void buildTree();
+
+    std::vector<std::string> query(const std::string& value,
+                                   const std::string& qStart,
+                                   const std::string& qEnd) const;
+
+    std::vector<const Node*> queryNodes(const std::string& value,
+                                        const std::string& qStart,
+                                        const std::string& qEnd) const;
 };

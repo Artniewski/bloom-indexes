@@ -1,97 +1,103 @@
 #include "bloomTree.hpp"
 
-bloomTree::bloomTree(int ratio){
-    this->ratio = ratio;
+#include <iostream>
+
+void BloomTree::addLeafNode(BloomFilter&& bv, const std::string& file,
+                            const std::string& start, const std::string& end) {
+    leafNodes.emplace_back(std::make_unique<Node>(std::move(bv), file, start, end));
 }
 
-void bloomTree::createLeafLevel(bloom_value bv, std::string filename){
-
-    node *tn = new node(bv, filename);
-    leafnodes.push_back(tn);    
-    // std::cout <<"Leaf level " << leafnodes.size() << " created" << std::endl;
-
-}
-
-std::vector<std::string> bloomTree::checkExistance(std::string value){
-    checkExistance(root, value);
-    return bloomNames;
-}
-
-int bloomTree::GetScannedHierarchyFilters(){
-    return foundInHierarchy;
-}
-
-void bloomTree::checkExistance(node* n, std::string value){
-        if (n == nullptr) {
-            std::cout << "Root is null" << std::endl;
-        return; // Prevent accessing null nodes
+void BloomTree::buildLevel(std::vector<std::unique_ptr<Node>>& nodes) {
+    if (nodes.size() == 1) {
+        root = std::move(nodes.front());
+        return;
     }
-    if (n->filename!="Memory"){
-            bloomNames.push_back(n->filename);
-            // std::cout << "Checked value " << value << " in " << n->filename << std::endl;
+
+    std::vector<std::unique_ptr<Node>> parentLevel;
+    // sort
+    std::sort(nodes.begin(), nodes.end(), [](const std::unique_ptr<Node>& a, const std::unique_ptr<Node>& b) {
+        return a->startKey < b->startKey;
+    });
+
+    for (size_t i = 0; i < nodes.size(); i += ratio) {
+        size_t end = std::min(i + ratio, nodes.size());
+
+        // set keys based on sorted nodes
+        auto parent = std::make_unique<Node>(
+            // BloomFilter(expectedItems, bloomFalsePositiveRate), "Memory",
+            BloomFilter(bloomSize, numHashFunctions), "Memory",
+            nodes[i]->startKey, nodes[end - 1]->endKey);
+
+        for (size_t j = i; j < end; ++j) {
+            parent->bloom.merge(nodes[j]->bloom);
+            parent->children.push_back(std::move(nodes[j]));
+        }
+
+        parentLevel.push_back(std::move(parent));
     }
-    else{
-        if (n->blValue.exists(value)){
-        // std::cout << "Checked in: " << n->filename << std::endl;
-            // std::cout << "Checked value " << value << " in " << n->filename << std::endl;
-            foundInHierarchy++;
-            for (node* child : n->children) {
-                checkExistance(child, value);
+
+    buildLevel(parentLevel);
+}
+
+void BloomTree::buildTree() {
+    buildLevel(leafNodes);
+}
+
+void BloomTree::search(Node* node, const std::string& value,
+                       const std::string& qStart, const std::string& qEnd,
+                       std::vector<std::string>& results) const {
+    if (!node) return;
+
+    bool overlaps =
+        (qEnd.empty() || node->startKey <= qEnd) &&
+        (qStart.empty() || node->endKey >= qStart);
+
+    
+    if (overlaps && node->bloom.exists(value)) {
+        if (node->filename != "Memory") {
+            results.push_back(node->filename);
+        } else {
+            for (const auto& child : node->children) {
+                search(child.get(), value, qStart, qEnd, results);
             }
         }
     }
-        
 }
 
-
-void bloomTree::createTree(){
-    // std::cout << "Creating Tree" << std::endl;
-    createLevel(leafnodes);
+std::vector<std::string> BloomTree::query(const std::string& value,
+                                          const std::string& qStart,
+                                          const std::string& qEnd) const {
+    std::vector<std::string> results;
+    search(root.get(), value, qStart, qEnd, results);
+    return results;
 }
 
-void bloomTree::traverse(node* n) {
-        if (n == nullptr)
-            return;
+// search that returns nodes
+void BloomTree::searchNodes(Node* node, const std::string& value,
+                            const std::string& qStart, const std::string& qEnd,
+                            std::vector<const Node*>& results) const {
+    if (!node) return;
 
-        std::cout << "BloomL: " << n->filename << std::endl;
-        // std::cout << "Bloom Size: " << n->blValue.bitArray.size() << std::endl;
-        // std::cout << "Number of 0 in Bloom: " << n->blValue.bitArray.size() - n->blValue.bitArray.count() << std::endl;
-        // std::cout << "Bloom Value: " << n->blValue.bitArray << std::endl;
-        std::cout << "Children: " << n->children.size() << std::endl;
-        for (node* child : n->children) {
-            std::cout << "Child: " << child->filename;
+    bool overlaps =
+        (qEnd.empty() || node->startKey <= qEnd) &&
+        (qStart.empty() || node->endKey >= qStart);
+
+    if (overlaps && node->bloom.exists(value)) {
+        if (node->children.empty()) {
+            results.push_back(node);
+        } else {
+            for (const auto& child : node->children) {
+                searchNodes(child.get(), value, qStart, qEnd, results);
+            }
         }
-        std::cout << std::endl;
-        std::cout << "--------------------------------" << std::endl;
-
-        for (node* child : n->children) {
-            traverse(child);
-        }
     }
+}
 
-void bloomTree::createLevel(std::vector<node*> nodes){
-
-    std::vector<node*> levelNodes;
-
-    int size = static_cast<int>(nodes.size());
-
-    double loop = ceil(size/ratio);
-
-    for (int i=0; i<loop+1; i++){
-        node *n = new node();
-        n->addchildren(i*ratio, ratio, nodes);
-        for (node* child : n->children) {
-            n->blValue.bitArray = n->blValue.bitArray | child->blValue.bitArray;
-        }
-        levelNodes.push_back(n);
-    }
-
-    int levelsize = static_cast<int>(levelNodes.size());
-    if (levelsize>1){
-        createLevel(levelNodes);
-    }
-    else{
-        root = levelNodes[0];
-    }
-
+// query where return type is vector of nodes
+std::vector<const Node*> BloomTree::queryNodes(const std::string& value,
+                                               const std::string& qStart,
+                                               const std::string& qEnd) const {
+    std::vector<const Node*> results;
+    searchNodes(root.get(), value, qStart, qEnd, results);
+    return results;
 }
