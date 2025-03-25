@@ -5,8 +5,10 @@
 #include "node.hpp"
 
 class BloomTree {
+   public:
+    Node* root;
+
    private:
-    std::unique_ptr<Node> root;
     int ratio;
     size_t bloomSize;
     int numHashFunctions;
@@ -15,7 +17,7 @@ class BloomTree {
     //  size_t expectedItems;
     //  double bloomFalsePositiveRate;
 
-    void buildLevel(std::vector<std::unique_ptr<Node>>& nodes);
+    void buildLevel(std::vector<Node*>& nodes);
     void search(Node* node, const std::string& value,
                 const std::string& qStart, const std::string& qEnd,
                 std::vector<std::string>& results) const;
@@ -35,7 +37,7 @@ class BloomTree {
           bloomSize(bloomSize),
           numHashFunctions(numHashFunctions) {}
 
-    std::vector<std::unique_ptr<Node>> leafNodes;
+    std::vector<Node*> leafNodes;
 
     void addLeafNode(BloomFilter&& bv, const std::string& file,
                      const std::string& start, const std::string& end);

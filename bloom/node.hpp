@@ -7,7 +7,7 @@
 
 class Node {
    public:
-    std::vector<std::unique_ptr<Node>> children;
+    std::vector<Node*> children;
     BloomFilter bloom;
     std::string filename;
     std::string startKey;

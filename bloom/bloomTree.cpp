@@ -4,18 +4,18 @@
 
 void BloomTree::addLeafNode(BloomFilter&& bv, const std::string& file,
                             const std::string& start, const std::string& end) {
-    leafNodes.emplace_back(std::make_unique<Node>(std::move(bv), file, start, end));
+    leafNodes.push_back(new Node(std::move(bv), file, start, end));
 }
 
-void BloomTree::buildLevel(std::vector<std::unique_ptr<Node>>& nodes) {
+void BloomTree::buildLevel(std::vector<Node*>& nodes) {
     if (nodes.size() == 1) {
         root = std::move(nodes.front());
         return;
     }
 
-    std::vector<std::unique_ptr<Node>> parentLevel;
+    std::vector<Node*> parentLevel;
     // sort
-    std::sort(nodes.begin(), nodes.end(), [](const std::unique_ptr<Node>& a, const std::unique_ptr<Node>& b) {
+    std::sort(nodes.begin(), nodes.end(), [](const Node* a, const Node* b) {
         return a->startKey < b->startKey;
     });
 
@@ -23,17 +23,15 @@ void BloomTree::buildLevel(std::vector<std::unique_ptr<Node>>& nodes) {
         size_t end = std::min(i + ratio, nodes.size());
 
         // set keys based on sorted nodes
-        auto parent = std::make_unique<Node>(
-            // BloomFilter(expectedItems, bloomFalsePositiveRate), "Memory",
-            BloomFilter(bloomSize, numHashFunctions), "Memory",
-            nodes[i]->startKey, nodes[end - 1]->endKey);
+        Node* parent = new Node(BloomFilter(bloomSize, numHashFunctions), "Memory",
+                                nodes[i]->startKey, nodes[end - 1]->endKey);
 
         for (size_t j = i; j < end; ++j) {
             parent->bloom.merge(nodes[j]->bloom);
             parent->children.push_back(std::move(nodes[j]));
         }
 
-        parentLevel.push_back(std::move(parent));
+        parentLevel.push_back(parent);
     }
 
     buildLevel(parentLevel);
@@ -52,13 +50,12 @@ void BloomTree::search(Node* node, const std::string& value,
         (qEnd.empty() || node->startKey <= qEnd) &&
         (qStart.empty() || node->endKey >= qStart);
 
-    
     if (overlaps && node->bloom.exists(value)) {
         if (node->filename != "Memory") {
             results.push_back(node->filename);
         } else {
-            for (const auto& child : node->children) {
-                search(child.get(), value, qStart, qEnd, results);
+            for (Node* child : node->children) {
+                search(child, value, qStart, qEnd, results);
             }
         }
     }
@@ -68,7 +65,7 @@ std::vector<std::string> BloomTree::query(const std::string& value,
                                           const std::string& qStart,
                                           const std::string& qEnd) const {
     std::vector<std::string> results;
-    search(root.get(), value, qStart, qEnd, results);
+    search(root, value, qStart, qEnd, results);
     return results;
 }
 
@@ -86,8 +83,8 @@ void BloomTree::searchNodes(Node* node, const std::string& value,
         if (node->children.empty()) {
             results.push_back(node);
         } else {
-            for (const auto& child : node->children) {
-                searchNodes(child.get(), value, qStart, qEnd, results);
+            for (Node* child : node->children) {
+                searchNodes(child, value, qStart, qEnd, results);
             }
         }
     }
@@ -98,6 +95,6 @@ std::vector<const Node*> BloomTree::queryNodes(const std::string& value,
                                                const std::string& qStart,
                                                const std::string& qEnd) const {
     std::vector<const Node*> results;
-    searchNodes(root.get(), value, qStart, qEnd, results);
+    searchNodes(root, value, qStart, qEnd, results);
     return results;
 }

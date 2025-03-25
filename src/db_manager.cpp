@@ -219,63 +219,73 @@ bool DBManager::noBloomcheckValueInColumn(const std::string& column, const std::
     for (iter->SeekToFirst(); iter->Valid(); iter->Next()) {
         if (iter->value().ToString() == value) {
             sw.stop();
-            spdlog::info("Found '{}' in column '{}' in {} µs.", value, column, sw.elapsedMicros());
+            spdlog::info("Found '{}...' in column '{}' in {} µs.", value.substr(0, 30), column, sw.elapsedMicros());
             return true;
         }
     }
 
     sw.stop();
-    spdlog::info("Did NOT find '{}' in column '{}' after {} µs.", value, column, sw.elapsedMicros());
+    spdlog::info("Did NOT find '{}...' in column '{}' after {} µs.", value.substr(0, 30), column, sw.elapsedMicros());
     return false;
 }
 
-bool DBManager::noBloomCheckRecordWithTwoColumns(const std::string& column1, const std::string& value1,
-                                                 const std::string& column2, const std::string& value2) {
-    StopWatch sw;
-
-    if (!db_) {
-        throw std::runtime_error("DB not open.");
+std::vector<std::string> DBManager::scanForRecordsInColumns(
+    const std::vector<std::string>& columns,
+    const std::vector<std::string>& values) {
+    if (columns.size() != values.size() || columns.empty()) {
+        throw std::runtime_error("Number of columns and values must be equal and non-empty.");
     }
 
-    auto cf_handle1 = cf_handles_.find(column1);
-    auto cf_handle2 = cf_handles_.find(column2);
+    StopWatch sw;
+    sw.start();
 
-    if (cf_handle1 == cf_handles_.end() || cf_handle2 == cf_handles_.end()) {
-        throw std::runtime_error("One or both Column Families not found.");
+    std::vector<std::string> matchingKeys;
+
+    // Use the first column as the base for scanning.
+    auto baseIt = cf_handles_.find(columns[0]);
+    if (baseIt == cf_handles_.end()) {
+        throw std::runtime_error("Column Family not found for base column: " + columns[0]);
     }
 
     rocksdb::ReadOptions readOptions;
     readOptions.fill_cache = false;
 
-    auto iter1 = std::unique_ptr<rocksdb::Iterator>(db_->NewIterator(readOptions, cf_handle1->second.get()));
+    // Create an iterator for the base column and scan the entire key range.
+    std::unique_ptr<rocksdb::Iterator> iter(db_->NewIterator(readOptions, baseIt->second.get()));
+    iter->SeekToFirst();
 
-    sw.start();
-    for (iter1->SeekToFirst(); iter1->Valid(); iter1->Next()) {
-        if (iter1->value().ToString() == value1) {
-            std::string key = iter1->key().ToString();
-
-            // Verify match in second column
-            std::string value2_candidate;
-            auto s = db_->Get(readOptions, cf_handle2->second.get(), key, &value2_candidate);
-
-            if (s.ok() && value2_candidate == value2) {
-                sw.stop();
-                spdlog::info("Found matching record: [{}='{}', {}='{}'] in {} µs.",
-                             column1, value1, column2, value2, sw.elapsedMicros());
-                return true;
+    for (; iter->Valid(); iter->Next()) {
+        std::string key = iter->key().ToString();
+        bool allMatch = true;
+        // For each column, get the value associated with the same key.
+        for (size_t i = 0; i < columns.size(); ++i) {
+            auto cfIt = cf_handles_.find(columns[i]);
+            if (cfIt == cf_handles_.end()) {
+                allMatch = false;
+                break;
             }
+            std::string candidateValue;
+            auto status = db_->Get(readOptions, cfIt->second.get(), key, &candidateValue);
+            if (!status.ok() || candidateValue != values[i]) {
+                allMatch = false;
+                break;
+            }
+        }
+        if (allMatch) {
+            matchingKeys.push_back(key);
         }
     }
 
     sw.stop();
-    spdlog::info("No matching record found for [{}='{}', {}='{}'] after {} µs.",
-                 column1, value1, column2, value2, sw.elapsedMicros());
-    return false;
+    spdlog::info("Scanned entire DB for {} columns in {} µs, found {} matching keys.",
+                 columns.size(), sw.elapsedMicros(), matchingKeys.size());
+
+    return matchingKeys;
 }
 
-std::unordered_set<std::string> DBManager::scanFileForKeysWithValue(const std::string& filename, const std::string& value,
-                                                                    const std::string& rangeStart, const std::string& rangeEnd) {
-    std::unordered_set<std::string> matchingKeys;
+std::vector<std::string> DBManager::scanFileForKeysWithValue(const std::string& filename, const std::string& value,
+                                                             const std::string& rangeStart, const std::string& rangeEnd) {
+    std::vector<std::string> matchingKeys;
     rocksdb::Options options;
     options.env = rocksdb::Env::Default();
 
@@ -301,7 +311,7 @@ std::unordered_set<std::string> DBManager::scanFileForKeysWithValue(const std::s
         if (!rangeEnd.empty() && currentKey > rangeEnd) break;
 
         if (iter->value().ToString() == value) {
-            matchingKeys.insert(currentKey);
+            matchingKeys.push_back(currentKey);
         }
         iter->Next();
     }
@@ -341,7 +351,7 @@ bool DBManager::findRecordInHierarchy(BloomTree& hierarchy, const std::string& v
         for (auto it = futures.begin(); it != futures.end();) {
             if (it->wait_for(std::chrono::milliseconds(0)) == std::future_status::ready) {
                 if (it->get()) {
-                    spdlog::debug("Value \"{}\" truly found in one of the files.", value);
+                    spdlog::debug("Value truly found in one of the files.");
                     sw.stop();
                     spdlog::critical("checkValueInHierarchy took {} µs.", sw.elapsedMicros());
                     return true;
@@ -358,57 +368,53 @@ bool DBManager::findRecordInHierarchy(BloomTree& hierarchy, const std::string& v
     return false;
 }
 
-bool DBManager::findRecordInHierarchies(BloomTree& hierarchy1, const std::string& value1,
-                                        BloomTree& hierarchy2, const std::string& value2) {
+std::vector<std::string> DBManager::findUsingSingleHierarchy(BloomTree& hierarchy,
+                                                             const std::vector<std::string>& columns,
+                                                             const std::vector<std::string>& values) {
+    if (columns.size() != values.size() || columns.empty()) {
+        throw std::runtime_error("Number of columns and values must be equal and non-empty.");
+    }
+
     StopWatch sw;
     sw.start();
 
-    // Query first hierarchy to get candidates containing node
-    auto candidates1 = hierarchy1.queryNodes(value1, "", "");
-    // log candidates
-    for (const auto& candidate : candidates1) {
-        spdlog::info("Candidate found in the first hierarchy for '{}': {} to {} in {}.",
-                     value1, candidate->startKey, candidate->endKey, candidate->filename);
+    std::vector<const Node*> candidates = hierarchy.queryNodes(values[0], "", "");
+    if (candidates.empty()) {
+        spdlog::info("No candidates found in the hierarchy for '{}'.", values[0]);
+        return {};
     }
-    if (candidates1.empty()) {
-        spdlog::info("No candidates found in the first hierarchy for '{}'.", value1);
-        return false;
-    }
-    // query second hierarchy for each candidate in the first hierarchy
-    for (const auto& candidate1 : candidates1) {
-        // log candidate start end key
-        spdlog::info("Checking candidate1 start key: {} end key: {}", candidate1->startKey, candidate1->endKey);
-        auto nodes = hierarchy2.queryNodes(value2, candidate1->startKey, candidate1->endKey);
-        if (!nodes.empty()) {
-            sw.stop();
-            spdlog::info("Found matching record for '{}' and '{}' after {} µs.",
-                         value1, value2, sw.elapsedMicros());
-        }
-        auto keys1 = scanFileForKeysWithValue(candidate1->filename, value1, candidate1->startKey, candidate1->endKey);
-        // log keys
-        for (const auto& key : keys1) {
-            spdlog::info("Keys found in candidate1: {}", key);
-        }
-        spdlog::info("Keys found in candidate1: {}", keys1.size());
-        for (const auto& node : nodes) {
-            auto keys2 = scanFileForKeysWithValue(node->filename, value2, node->startKey, node->endKey);
-            spdlog::info("Keys found in node: {}", keys2.size());
 
-            // check if any key from keys2 is in keys1
-            for (const auto& key : keys1) {
-                if (keys2.find(key) != keys2.end()) {
-                    sw.stop();
-                    spdlog::info("[key check] Found matching record for '{}' and '{}' after {} µs.",
-                                 value1, value2, sw.elapsedMicros());
-                    spdlog::info("Keys match: {}", key);
-                    return true;
+    std::vector<std::string> allKeys;
+    for (const auto& candidate : candidates) {
+        auto keys = scanFileForKeysWithValue(candidate->filename, values[0], candidate->startKey, candidate->endKey);
+        allKeys.insert(allKeys.end(), keys.begin(), keys.end());
+    }
+
+    std::vector<std::future<std::string>> futures;
+    for (const auto& key : allKeys) {
+        spdlog::info("Checking key: {}", key.substr(0, 30));
+        futures.emplace_back(std::async(std::launch::async, [this, key, &columns, &values]() -> std::string {
+            bool result = true;
+            for (size_t i = 0; i < columns.size(); ++i) {
+                if (!noBloomcheckValueInColumn(columns[i], values[i])) {
+                    result = false;
+                    break;
                 }
             }
+            return result ? key : std::string();
+        }));
+    }
+
+    // Wait for all asynchronous tasks to finish and collect matching keys.
+    std::vector<std::string> matchingKeys;
+    for (auto& fut : futures) {
+        std::string res = fut.get();
+        if (!res.empty()) {
+            matchingKeys.push_back(res);
         }
     }
 
     sw.stop();
-    spdlog::info("No matching record found for '{}' and '{}' after {} µs.",
-                 value1, value2, sw.elapsedMicros());
-    return false;
+    spdlog::critical("Single hierarchy check took {} µs, found {} matching keys.", sw.elapsedMicros(), matchingKeys.size());
+    return matchingKeys;
 }
