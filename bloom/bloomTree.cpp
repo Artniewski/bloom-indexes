@@ -1,6 +1,7 @@
 #include "bloomTree.hpp"
 
 #include <iostream>
+#include <algorithm>
 
 void BloomTree::addLeafNode(BloomFilter&& bv, const std::string& file,
                             const std::string& start, const std::string& end) {
