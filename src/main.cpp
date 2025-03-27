@@ -41,6 +41,8 @@ void runColumnTest(int attemptIndex,
     dbManager.openDB(dbName, params.compactionLogging);
     dbManager.insertRecords(params.numRecords, allColumns);
 
+    std::this_thread::sleep_for(std::chrono::seconds(5));
+
     // Build a BloomTree hierarchy for each column.
     std::map<std::string, BloomTree> hierarchies;
     std::vector<std::future<std::pair<std::string, BloomTree>>> futures;
