@@ -1,6 +1,7 @@
 #include <spdlog/spdlog.h>
 
 #include <chrono>
+#include <future>
 #include <iostream>
 #include <map>
 #include <string>
@@ -40,17 +41,23 @@ void runColumnTest(int attemptIndex,
     dbManager.openDB(dbName, params.compactionLogging);
     dbManager.insertRecords(params.numRecords, allColumns);
 
-    // Give the system a moment
-    std::this_thread::sleep_for(std::chrono::seconds(5));
-
     // Build a BloomTree hierarchy for each column.
     std::map<std::string, BloomTree> hierarchies;
+    std::vector<std::future<std::pair<std::string, BloomTree>>> futures;
+
     for (const auto& column : allColumns) {
-        auto sstFiles = dbManager.scanSSTFilesForColumn(dbName, column);
-        BloomTree hierarchy = bloomManager.createPartitionedHierarchy(
-            sstFiles, params.itemsPerPartition, params.bloomSize, params.bloomTreeRatio, params.numHashFunctions);
-        hierarchies.try_emplace(column, std::move(hierarchy));
-        spdlog::info("Hierarchy built for column: {}", column);
+        futures.push_back(std::async(std::launch::async, [&dbManager, &bloomManager, dbName, &params](const std::string& col) -> std::pair<std::string, BloomTree> {
+            auto sstFiles = dbManager.scanSSTFilesForColumn(dbName, col);
+            BloomTree hierarchy = bloomManager.createPartitionedHierarchy(
+                sstFiles, params.itemsPerPartition, params.bloomSize, params.bloomTreeRatio, params.numHashFunctions);
+            spdlog::info("Hierarchy built for column: {}", col);
+            return { col, std::move(hierarchy) }; }, column));
+    }
+
+    // Collect results and build the map.
+    for (auto& fut : futures) {
+        auto [col, tree] = fut.get();
+        hierarchies.try_emplace(col, std::move(tree));
     }
 
     // --- Global Scan Query ---
@@ -82,7 +89,6 @@ void runColumnTest(int attemptIndex,
     for (const auto& key : hierarchicalMatches) {
         spdlog::debug("[Multi] Match key: {}...", key.substr(0, 30));
     }
-
 
     // --- Hierarch Single Column Query ---
     // Use the first column to query the hierarchy and then scan the DB for the remaining columns.

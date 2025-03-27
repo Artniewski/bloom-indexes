@@ -1,7 +1,7 @@
 #include "bloomTree.hpp"
 
-#include <iostream>
 #include <algorithm>
+#include <iostream>
 
 void BloomTree::addLeafNode(BloomFilter&& bv, const std::string& file,
                             const std::string& start, const std::string& end) {
@@ -15,19 +15,20 @@ void BloomTree::buildLevel(std::vector<Node*>& nodes) {
     }
 
     std::vector<Node*> parentLevel;
-    // sort
-    std::sort(nodes.begin(), nodes.end(), [](const Node* a, const Node* b) {
-        return a->startKey < b->startKey;
-    });
 
     for (size_t i = 0; i < nodes.size(); i += ratio) {
         size_t end = std::min(i + ratio, nodes.size());
 
-        // set keys based on sorted nodes
         Node* parent = new Node(BloomFilter(bloomSize, numHashFunctions), "Memory",
                                 nodes[i]->startKey, nodes[end - 1]->endKey);
 
         for (size_t j = i; j < end; ++j) {
+            if (parent->startKey > nodes[j]->startKey) {
+                parent->startKey = nodes[j]->startKey;
+            }
+            if (parent->endKey < nodes[j]->endKey) {
+                parent->endKey = nodes[j]->endKey;
+            }
             parent->bloom.merge(nodes[j]->bloom);
             parent->children.push_back(std::move(nodes[j]));
         }

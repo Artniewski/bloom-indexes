@@ -77,7 +77,7 @@ void DBManager::insertRecords(int numRecords, std::vector<std::string> columns) 
             auto handle = cf_handles_.at(column).get();
             batch.Put(handle, key, value);
         }
-        if (i % 100000 == 0) {
+        if (i % 1000000 == 0) {
             auto s = db_->Write(rocksdb::WriteOptions(), &batch);
             if (!s.ok()) throw std::runtime_error("Batch write failed: " + s.ToString());
             batch.Clear();
