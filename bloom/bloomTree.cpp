@@ -110,12 +110,7 @@ std::vector<const Node*> BloomTree::queryNodes(const std::string& value,
 static size_t computeNodeMemory(const Node* node) {
     if (!node) return 0;
     size_t mem = 0;
-
-    mem += sizeof(Node);
-    mem += node->children.capacity() * sizeof(Node*);
-    mem += node->filename.capacity() * sizeof(char);
-    mem += node->startKey.capacity() * sizeof(char);
-    mem += node->endKey.capacity() * sizeof(char);
+    
     mem += node->bloom.bitArray.capacity() / CHAR_BIT;
     mem += sizeof(node->bloom.bitArray);
 
