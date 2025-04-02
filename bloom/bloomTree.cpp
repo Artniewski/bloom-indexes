@@ -1,7 +1,13 @@
 #include "bloomTree.hpp"
 
+#include <unistd.h>
+
 #include <algorithm>
+#include <climits>
+#include <cstdio>
+#include <filesystem>
 #include <iostream>
+#include <stdexcept>
 
 void BloomTree::addLeafNode(BloomFilter&& bv, const std::string& file,
                             const std::string& start, const std::string& end) {
@@ -99,4 +105,53 @@ std::vector<const Node*> BloomTree::queryNodes(const std::string& value,
     std::vector<const Node*> results;
     searchNodes(root, value, qStart, qEnd, results);
     return results;
+}
+
+static size_t computeNodeMemory(const Node* node) {
+    if (!node) return 0;
+    size_t mem = 0;
+
+    mem += sizeof(Node);
+    mem += node->children.capacity() * sizeof(Node*);
+    mem += node->filename.capacity() * sizeof(char);
+    mem += node->startKey.capacity() * sizeof(char);
+    mem += node->endKey.capacity() * sizeof(char);
+    mem += node->bloom.bitArray.capacity() / CHAR_BIT;
+    mem += sizeof(node->bloom.bitArray);
+
+    for (const Node* child : node->children) {
+        mem += computeNodeMemory(child);
+    }
+    return mem;
+}
+
+size_t BloomTree::memorySize() const {
+    return computeNodeMemory(root);
+}
+
+static size_t computeBloomFilterDiskSize(const BloomFilter& bf) {
+    char tmpName[] = "/tmp/bloomXXXXXX";
+    int fd = mkstemp(tmpName);
+    if (fd == -1) {
+        throw std::runtime_error("mkstemp failed");
+    }
+    close(fd);
+
+    bf.saveToFile(std::string(tmpName));
+
+    size_t size = std::filesystem::file_size(tmpName);
+
+    std::remove(tmpName);
+
+    return size;
+}
+
+size_t BloomTree::diskSize() const {
+    size_t total = 0;
+    for (const Node* leaf : leafNodes) {
+        if (leaf->filename != "Memory") {
+            total += computeBloomFilterDiskSize(leaf->bloom);
+        }
+    }
+    return total;
 }

@@ -51,4 +51,7 @@ class BloomTree {
     std::vector<const Node*> queryNodes(const std::string& value,
                                         const std::string& qStart,
                                         const std::string& qEnd) const;
+
+    size_t memorySize() const;
+    size_t diskSize() const;
 };

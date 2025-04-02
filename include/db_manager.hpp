@@ -3,6 +3,7 @@
 
 #include <rocksdb/db.h>
 #include <rocksdb/sst_file_reader.h>
+#include <rocksdb/sst_file_manager.h>
 
 #include <memory>
 #include <string>

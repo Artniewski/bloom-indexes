@@ -7,11 +7,10 @@
 
 class BloomFilter {
    private:
-    std::vector<bool> bitArray;
-
     size_t hash(const std::string& key, int seed) const;
 
    public:
+    std::vector<bool> bitArray;
     int numHashFunctions;
     size_t bitArraySize;
     //  for future use

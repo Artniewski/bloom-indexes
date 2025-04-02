@@ -2,6 +2,7 @@
 
 #include <rocksdb/iterator.h>
 #include <rocksdb/options.h>
+#include <rocksdb/sst_file_manager.h>
 #include <rocksdb/sst_file_reader.h>
 #include <rocksdb/status.h>
 #include <rocksdb/table_properties.h>
