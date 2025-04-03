@@ -47,6 +47,9 @@ void BloomTree::buildLevel(std::vector<Node*>& nodes) {
 
 void BloomTree::buildTree() {
     buildLevel(leafNodes);
+    for (Node* node : leafNodes) {
+        node->bloom.saveToFile(node->filename + "_" + node->startKey + "_" + node->endKey);
+    }
 }
 
 void BloomTree::search(Node* node, const std::string& value,
