@@ -107,7 +107,7 @@ void runColumnTest(int attemptIndex,
 
 // ############# EXP1 ####################
 
-void runExp1() {
+void runExp1(std::string baseDir) {
     const std::vector<std::string> columns = {"phone", "mail", "address"};
     const std::vector<int> dbSizes = {4'000'000, 10'000'000, 20'000'000};
 
@@ -115,7 +115,7 @@ void runExp1() {
     BloomManager bloomManager;
 
     for (const auto& dbSize : dbSizes) {
-        TestParams params = {"exp1_db_" + std::to_string(dbSize), false, dbSize, 3, 1, 100000, 1'000'000, 6};
+        TestParams params = {baseDir + "/exp1_db_" + std::to_string(dbSize), false, dbSize, 3, 1, 100000, 1'000'000, 6};
         spdlog::info("ExpBloomMetrics: Rozpoczynam eksperyment dla bazy '{}'", params.dbName);
 
         dbManager.openDB(params.dbName, params.compactionLogging);
@@ -152,7 +152,7 @@ void runExp1() {
         auto allDbSize = 0;
 
         // Zapis wyników do pliku CSV
-        std::ofstream out("exp_1_bloom_metrics.csv", std::ios::app);
+        std::ofstream out(baseDir + "/exp_1_bloom_metrics.csv", std::ios::app);
         if (!out) {
             spdlog::error("ExpBloomMetrics: Nie udało się otworzyć pliku wynikowego!");
             return;
@@ -175,16 +175,16 @@ void runExp1() {
 // columns=3,bloomTreeRatio=3, numRecords=50M,
 // Kolumny:Rozmiar bazy danych| rozmiar filtrów Blooma na dysku | rozmiar filtrów Blooma w pamięci RAM
 //  Wiersze: dla itemsPerPartition: 50000, 100000, 200000
-void runExp2() {
+void runExp2(std::string baseDir) {
     const std::vector<std::string> columns = {"phone", "mail", "address"};
     int dbSize = 5'000'000;
-    const std::vector<size_t> itemsPerPartition = {50000, 100000, 200000};
+    const std::vector<size_t> itemsPerPartition = {50000};
 
     DBManager dbManager;
     BloomManager bloomManager;
 
     for (const auto& items : itemsPerPartition) {
-        TestParams params = {"exp2_db_" + std::to_string(items), false, dbSize, 3, 1, items, items * 10, 6};
+        TestParams params = {baseDir + "/exp2_db_" + std::to_string(items), false, dbSize, 3, 1, items, items * 10, 6};
         spdlog::info("ExpBloomMetrics: Rozpoczynam eksperyment dla bazy '{}'", params.dbName);
 
         dbManager.openDB(params.dbName, params.compactionLogging);
@@ -219,7 +219,7 @@ void runExp2() {
         }
 
         // Zapis wyników do pliku CSV
-        std::ofstream out("exp_2_bloom_metrics.csv", std::ios::app);
+        std::ofstream out(baseDir + "/exp_2_bloom_metrics.csv", std::ios::app);
         if (!out) {
             spdlog::error("ExpBloomMetrics: Nie udało się otworzyć pliku wynikowego!");
             return;
@@ -239,7 +239,7 @@ void runExp2() {
 // Założenia: columns=3,bloomTreeRatio=3, itemsPerPartition= 100000
 // Kolumny: Czas tworzenia bazy danych| Czas tworzenia fitrów Blooma na dysku | Czas tworzenia fitrów Blooma na pamięci RAM
 // Wiersze: dla numRecords: 10M, 50M, 100M, 500M
-void runExp3() {
+void runExp3(std::string baseDir) {
     const std::vector<std::string> columns = {"phone", "mail", "address"};
     const std::vector<int> dbSizes = {1'000'000, 4'000'000};
 
@@ -247,7 +247,7 @@ void runExp3() {
     BloomManager bloomManager;
 
     for (const auto& dbSize : dbSizes) {
-        TestParams params = {"exp3_db_" + std::to_string(dbSize), false, dbSize, 3, 1, 100000, 1'000'000, 6};
+        TestParams params = {baseDir + "/exp3_db_" + std::to_string(dbSize), false, dbSize, 3, 1, 100000, 1'000'000, 6};
         spdlog::info("ExpBloomMetrics: Rozpoczynam eksperyment dla bazy '{}'", params.dbName);
 
         StopWatch stopwatch;
@@ -280,7 +280,7 @@ void runExp3() {
         auto bloomCreationTime = stopwatch.elapsedMicros();
 
         // Zapis wyników do pliku CSV
-        std::ofstream out("exp_3_bloom_metrics.csv", std::ios::app);
+        std::ofstream out(baseDir + "/exp_3_bloom_metrics.csv", std::ios::app);
         if (!out) {
             spdlog::error("ExpBloomMetrics: Nie udało się otworzyć pliku wynikowego!");
             return;
@@ -294,8 +294,12 @@ void runExp3() {
 }
 // ##### Main function ####
 int main() {
+    const std::string baseDir = "db";
+    if (!std::filesystem::exists(baseDir)) {
+        std::filesystem::create_directory(baseDir);
+    }
     try {
-        runExp2();
+        runExp2(baseDir);
     } catch (const std::exception& e) {
         spdlog::error("[Error] {}", e.what());
         return EXIT_FAILURE;
