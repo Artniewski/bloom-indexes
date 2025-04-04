@@ -377,6 +377,87 @@ void runExp4(std::string baseDir) {
     }
 }
 
+// ############# EXP5 ####################
+// Cel: Porównanie metod przeszukiwania (jedna szukana wartość istniejąca w bazie)
+// Założenia: columns=3,bloomTreeRatio=3, numRecords= 50M
+// Kolumny: Global Scan| Hierarchical Single Column | Hierarchical Multi-Column
+// Wiersze: dla itemsPerPartition: 50000, 100000, 200000
+void runExp5(std::string baseDir) {
+    const std::vector<std::string> columns = {"phone", "mail", "address"};
+    const int dbSize = 4'000'000;
+    const std::vector<size_t> itemsPerPartition = {50000, 100000, 200000};
+
+    DBManager dbManager;
+    BloomManager bloomManager;
+
+    for (const auto& partitionSize : itemsPerPartition) {
+        TestParams params = {baseDir + "/exp4_db_" + std::to_string(partitionSize), false, dbSize, 3, 1, partitionSize, partitionSize * 10, 6};
+        spdlog::info("ExpBloomMetrics: Rozpoczynam eksperyment dla bazy '{}'", params.dbName);
+
+        dbManager.openDB(params.dbName, params.compactionLogging);
+        dbManager.insertRecords(params.numRecords, columns);
+
+        std::this_thread::sleep_for(std::chrono::seconds(10));
+
+        std::map<std::string, BloomTree> hierarchies;
+        std::vector<std::future<std::pair<std::string, BloomTree>>> futures;
+
+        for (const auto& column : columns) {
+            futures.push_back(std::async(std::launch::async, [&dbManager, &bloomManager, &params](const std::string& col) -> std::pair<std::string, BloomTree> {
+            auto sstFiles = dbManager.scanSSTFilesForColumn(params.dbName, col);
+            BloomTree hierarchy = bloomManager.createPartitionedHierarchy(
+                sstFiles, params.itemsPerPartition, params.bloomSize, params.bloomTreeRatio, params.numHashFunctions);
+            spdlog::info("Hierarchy built for column: {}", col);
+            return { col, std::move(hierarchy) }; }, column));
+        }
+
+        for (auto& fut : futures) {
+            auto [col, tree] = fut.get();
+            hierarchies.try_emplace(col, std::move(tree));
+        }
+
+        std::ofstream out(baseDir + "/exp_5_bloom_metrics.csv", std::ios::app);
+        if (!out) {
+            spdlog::error("ExpBloomMetrics: Nie udało się otworzyć pliku wynikowego!");
+            return;
+        }
+
+        // hierarchies vector
+        std::vector<BloomTree> queryTrees;
+        std::vector<std::string> expectedValues;
+        std::string expectedValueSuffix = "_value" + std::to_string(dbSize / 2) + std::string(1000, 'a');
+        for (const auto& column : columns) {
+            queryTrees.push_back(hierarchies.at(column));
+            expectedValues.push_back(column + expectedValueSuffix);
+        }
+
+        // --- Global Scan Query ---
+        StopWatch stopwatch;
+        stopwatch.start();
+        std::vector<std::string> globalMatches = dbManager.scanForRecordsInColumns(columns, expectedValues);
+        stopwatch.stop();
+        auto globalScanTime = stopwatch.elapsedMicros();
+        // --- Hierarchical Multi-Column Query ---
+        stopwatch.start();
+        std::vector<std::string> hierarchicalMatches = multiColumnQueryHierarchical(queryTrees, expectedValues, "", "", dbManager);
+        stopwatch.stop();
+        auto hierarchicalMultiTime = stopwatch.elapsedMicros();
+        // --- Hierarchical Single Column Query ---
+        stopwatch.start();
+        std::vector<std::string> singlehierarchyMatches = dbManager.findUsingSingleHierarchy(queryTrees[0], columns, expectedValues);
+        stopwatch.stop();
+        auto hierarchicalSingleTime = stopwatch.elapsedMicros();
+        // Zapis wyników do pliku CSV
+        out << params.numRecords << ","
+            << partitionSize << ","
+            << globalScanTime << ","
+            << hierarchicalSingleTime << ","
+            << hierarchicalMultiTime << "\n";
+        out.close();
+        dbManager.closeDB();
+    }
+}
+
 // ##### Main function ####
 int main() {
     const std::string baseDir = "db";
@@ -385,10 +466,11 @@ int main() {
     }
     try {
         // run section
-        runExp1(baseDir);
-        runExp2(baseDir);
-        runExp3(baseDir);
+        // runExp1(baseDir);
+        // runExp2(baseDir);
+        // runExp3(baseDir);
         runExp4(baseDir);
+        runExp5(baseDir);
     } catch (const std::exception& e) {
         spdlog::error("[Error] {}", e.what());
         return EXIT_FAILURE;
