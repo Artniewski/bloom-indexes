@@ -385,13 +385,14 @@ void runExp4(std::string baseDir) {
 void runExp5(std::string baseDir) {
     const std::vector<std::string> columns = {"phone", "mail", "address"};
     const int dbSize = 4'000'000;
+    const int bloomSize = 1'000'000;
     const std::vector<size_t> itemsPerPartition = {50000, 100000, 200000};
 
     DBManager dbManager;
     BloomManager bloomManager;
 
     for (const auto& partitionSize : itemsPerPartition) {
-        TestParams params = {baseDir + "/exp4_db_" + std::to_string(partitionSize), false, dbSize, 3, 1, partitionSize, partitionSize * 10, 6};
+        TestParams params = {baseDir + "/exp4_db_" + std::to_string(partitionSize), false, dbSize, 3, 1, partitionSize, bloomSize, 6};
         spdlog::info("ExpBloomMetrics: Rozpoczynam eksperyment dla bazy '{}'", params.dbName);
 
         dbManager.openDB(params.dbName, params.compactionLogging);
@@ -469,7 +470,7 @@ int main() {
         // runExp1(baseDir);
         // runExp2(baseDir);
         // runExp3(baseDir);
-        runExp4(baseDir);
+        // runExp4(baseDir);
         runExp5(baseDir);
     } catch (const std::exception& e) {
         spdlog::error("[Error] {}", e.what());
