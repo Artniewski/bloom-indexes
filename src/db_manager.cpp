@@ -11,11 +11,12 @@
 #include <filesystem>
 #include <future>
 #include <stdexcept>
+#include <unordered_set>
 
 #include "compaction_event_listener.hpp"
 #include "stopwatch.hpp"
 
-void DBManager::openDB(const std::string& dbname, bool withListener) {
+void DBManager::openDB(const std::string& dbname, bool withListener, std::vector<std::string> columns) {
     StopWatch sw;
     sw.start();
 
@@ -31,8 +32,8 @@ void DBManager::openDB(const std::string& dbname, bool withListener) {
         dbOptions.listeners.emplace_back(std::make_shared<CompactionEventListener>());
     }
 
-    // Define 5 hardcoded column families
-    std::vector<std::string> cf_names = {"default", "phone", "mail", "address", "name", "surname"};
+    std::vector<std::string> cf_names = columns;
+    cf_names.push_back("default");
     std::vector<rocksdb::ColumnFamilyDescriptor> cf_descriptors;
     for (const auto& name : cf_names) {
         cf_descriptors.emplace_back(name, rocksdb::ColumnFamilyOptions());
@@ -77,6 +78,56 @@ void DBManager::insertRecords(int numRecords, std::vector<std::string> columns) 
             const std::string value = column + "_value" + index + std::string(1000, 'a');
             auto handle = cf_handles_.at(column).get();
             batch.Put(handle, key, value);
+        }
+        if (i % 1000000 == 0) {
+            auto s = db_->Write(rocksdb::WriteOptions(), &batch);
+            if (!s.ok()) throw std::runtime_error("Batch write failed: " + s.ToString());
+            batch.Clear();
+            spdlog::debug("Inserted {} records...", i);
+        }
+    }
+
+    if (batch.Count() > 0) {
+        auto s = db_->Write(rocksdb::WriteOptions(), &batch);
+        if (!s.ok()) throw std::runtime_error("Final batch write failed: " + s.ToString());
+    }
+
+    for (const auto& column : columns) {
+        auto handle = cf_handles_.at(column).get();
+        auto s = db_->Flush(rocksdb::FlushOptions(), handle);
+        if (!s.ok()) throw std::runtime_error("Flush failed: " + s.ToString());
+    }
+
+    sw.stop();
+    spdlog::critical("Inserted {} records across CFs in {} µs.", numRecords, sw.elapsedMicros());
+}
+
+void DBManager::insertRecordsWithSearchTargets(int numRecords, const std::vector<std::string>& columns, int targetCount, std::string searchPattern) {
+    if (!db_) throw std::runtime_error("DB not open.");
+
+    StopWatch sw;
+    sw.start();
+    spdlog::info("Inserting {} records across {} CFs... with {} search targets", numRecords, columns.size(), targetCount);
+
+    int targetModulo = numRecords / targetCount;
+
+    rocksdb::WriteBatch batch;
+    for (int i = 1; i <= numRecords; ++i) {
+
+        bool isTarget = (i % targetModulo == 0);
+        // prefix index with 0s to ensure lexicographical order based on numRecords size
+        const std::string index = std::to_string(i);
+        const std::string prefixedIndex = std::string(20 - index.size(), '0') + std::to_string(i);
+
+        const std::string key = "key" + prefixedIndex;
+        for (const auto& column : columns) {
+            auto handle = cf_handles_.at(column).get();
+            const std::string value = column + "_value" + index + std::string(1000, 'a');
+            if(isTarget){
+                batch.Put(handle, key, searchPattern);
+            } else {
+                batch.Put(handle, key, value);
+            }
         }
         if (i % 1000000 == 0) {
             auto s = db_->Write(rocksdb::WriteOptions(), &batch);
@@ -220,7 +271,7 @@ bool DBManager::noBloomcheckValueInColumn(const std::string& column, const std::
     for (iter->SeekToFirst(); iter->Valid(); iter->Next()) {
         if (iter->value().ToString() == value) {
             sw.stop();
-            spdlog::info("Found '{}...' in column '{}' in {} µs.", value.substr(0, 30), column, sw.elapsedMicros());
+            // spdlog::info("Found '{}...' in column '{}' in {} µs.", value.substr(0, 30), column, sw.elapsedMicros());
             return true;
         }
     }

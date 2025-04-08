@@ -2,8 +2,8 @@
 #define DB_MANAGER_HPP
 
 #include <rocksdb/db.h>
-#include <rocksdb/sst_file_reader.h>
 #include <rocksdb/sst_file_manager.h>
+#include <rocksdb/sst_file_reader.h>
 
 #include <memory>
 #include <string>
@@ -13,8 +13,9 @@
 
 class DBManager {
    public:
-    void openDB(const std::string &dbname, bool withListener = false);
+    void openDB(const std::string &dbname, bool withListener = false, std::vector<std::string> columns = {"phone", "mail", "address", "name", "surname"});
     void insertRecords(int numRecords, std::vector<std::string> columns);
+    void insertRecordsWithSearchTargets(int numRecords, const std::vector<std::string>& columns, int targetCount, std::string searchPattern);
     std::vector<std::string> scanSSTFilesForColumn(const std::string &dbname, const std::string &column);
     bool isOpen() const { return static_cast<bool>(db_); }
     void closeDB();
