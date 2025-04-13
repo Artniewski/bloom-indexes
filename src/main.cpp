@@ -395,7 +395,7 @@ void runExp5(std::string baseDir) {
     BloomManager bloomManager;
 
     for (const auto& partitionSize : itemsPerPartition) {
-        TestParams params = {baseDir + "/exp4_db_" + std::to_string(partitionSize), false, dbSize, 3, 1, partitionSize, bloomSize, 6};
+        TestParams params = {baseDir + "/exp5_db_" + std::to_string(partitionSize), false, dbSize, 3, 1, partitionSize, bloomSize, 6};
         spdlog::info("ExpBloomMetrics: Rozpoczynam eksperyment dla bazy '{}'", params.dbName);
 
         dbManager.openDB(params.dbName, params.compactionLogging);
