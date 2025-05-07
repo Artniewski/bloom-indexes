@@ -54,4 +54,8 @@ class BloomTree {
 
     size_t memorySize() const;
     size_t diskSize() const;
+
+    void print() const {
+        root->print();
+    }
 };

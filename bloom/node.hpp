@@ -1,4 +1,6 @@
 #pragma once
+#include <spdlog/spdlog.h>
+
 #include <memory>
 #include <string>
 #include <vector>
@@ -18,5 +20,11 @@ class Node {
 
     Node(size_t bloomSize, double falsePositiveRate)
         : filename("Memory"), bloom(bloomSize, falsePositiveRate) {}
-    
+
+    void print() const {
+        spdlog::info("Node: {}, Start: {}, End: {}", filename, startKey, endKey);
+        for (const auto& child : children) {
+            child->print();
+        }
+    }
 };

@@ -53,7 +53,7 @@ void runColumnTest(int attemptIndex,
         futures.push_back(std::async(std::launch::async, [&dbManager, &bloomManager, dbName, &params](const std::string& col) -> std::pair<std::string, BloomTree> {
             auto sstFiles = dbManager.scanSSTFilesForColumn(dbName, col);
             BloomTree hierarchy = bloomManager.createPartitionedHierarchy(
-                sstFiles, params.itemsPerPartition, params.bloomSize, params.bloomTreeRatio, params.numHashFunctions);
+                sstFiles, params.itemsPerPartition, params.bloomSize, params.numHashFunctions, params.bloomTreeRatio);
             spdlog::info("Hierarchy built for column: {}", col);
             return { col, std::move(hierarchy) }; }, column));
     }
@@ -124,10 +124,9 @@ void runExp1(std::string baseDir, bool initMode) {
 
         if (!initMode) {
             dbManager.insertRecords(params.numRecords, columns);
+            spdlog::info("ExpBloomMetrics: 10 second sleep...");
+            std::this_thread::sleep_for(std::chrono::seconds(10));
         }
-
-        spdlog::info("ExpBloomMetrics: 10 second sleep...");
-        std::this_thread::sleep_for(std::chrono::seconds(10));
 
         std::map<std::string, BloomTree> hierarchies;
         std::vector<std::future<std::pair<std::string, BloomTree>>> futures;
@@ -136,8 +135,9 @@ void runExp1(std::string baseDir, bool initMode) {
             futures.push_back(std::async(std::launch::async, [&dbManager, &bloomManager, &params](const std::string& col) -> std::pair<std::string, BloomTree> {
             auto sstFiles = dbManager.scanSSTFilesForColumn(params.dbName, col);
             BloomTree hierarchy = bloomManager.createPartitionedHierarchy(
-                sstFiles, params.itemsPerPartition, params.bloomSize, params.bloomTreeRatio, params.numHashFunctions);
+                sstFiles, params.itemsPerPartition, params.bloomSize, params.numHashFunctions, params.bloomTreeRatio);
             spdlog::info("Hierarchy built for column: {}", col);
+            // hierarchy.print();
             return { col, std::move(hierarchy) }; }, column));
         }
 
@@ -195,10 +195,9 @@ void runExp2(std::string baseDir, bool initMode) {
 
         if (!initMode) {
             dbManager.insertRecords(params.numRecords, columns);
+            spdlog::info("ExpBloomMetrics: 10 second sleep...");
+            std::this_thread::sleep_for(std::chrono::seconds(10));
         }
-
-        spdlog::info("ExpBloomMetrics: 10 second sleep...");
-        std::this_thread::sleep_for(std::chrono::seconds(10));
 
         std::map<std::string, BloomTree> hierarchies;
         std::vector<std::future<std::pair<std::string, BloomTree>>> futures;
@@ -207,7 +206,7 @@ void runExp2(std::string baseDir, bool initMode) {
             futures.push_back(std::async(std::launch::async, [&dbManager, &bloomManager, &params](const std::string& col) -> std::pair<std::string, BloomTree> {
             auto sstFiles = dbManager.scanSSTFilesForColumn(params.dbName, col);
             BloomTree hierarchy = bloomManager.createPartitionedHierarchy(
-                sstFiles, params.itemsPerPartition, params.bloomSize, params.bloomTreeRatio, params.numHashFunctions);
+                sstFiles, params.itemsPerPartition, params.bloomSize, params.numHashFunctions, params.bloomTreeRatio);
             spdlog::info("Hierarchy built for column: {}", col);
             return { col, std::move(hierarchy) }; }, column));
         }
@@ -283,7 +282,7 @@ void runExp3(std::string baseDir, bool initMode) {
             futures.push_back(std::async(std::launch::async, [&dbManager, &bloomManager, &params](const std::string& col) -> std::pair<std::string, BloomTree> {
             auto sstFiles = dbManager.scanSSTFilesForColumn(params.dbName, col);
             BloomTree hierarchy = bloomManager.createPartitionedHierarchy(
-                sstFiles, params.itemsPerPartition, params.bloomSize, params.bloomTreeRatio, params.numHashFunctions);
+                sstFiles, params.itemsPerPartition, params.bloomSize, params.numHashFunctions, params.bloomTreeRatio);
             spdlog::info("Hierarchy built for column: {}", col);
             return { col, std::move(hierarchy) }; }, column));
         }
@@ -331,10 +330,9 @@ void runExp4(std::string baseDir, bool initMode) {
 
         if (!initMode) {
             dbManager.insertRecords(params.numRecords, columns);
+            spdlog::info("ExpBloomMetrics: 10 second sleep...");
+            std::this_thread::sleep_for(std::chrono::seconds(10));
         }
-
-        spdlog::info("ExpBloomMetrics: 10 second sleep...");
-        std::this_thread::sleep_for(std::chrono::seconds(10));
 
         std::map<std::string, BloomTree> hierarchies;
         std::vector<std::future<std::pair<std::string, BloomTree>>> futures;
@@ -343,7 +341,7 @@ void runExp4(std::string baseDir, bool initMode) {
             futures.push_back(std::async(std::launch::async, [&dbManager, &bloomManager, &params](const std::string& col) -> std::pair<std::string, BloomTree> {
             auto sstFiles = dbManager.scanSSTFilesForColumn(params.dbName, col);
             BloomTree hierarchy = bloomManager.createPartitionedHierarchy(
-                sstFiles, params.itemsPerPartition, params.bloomSize, params.bloomTreeRatio, params.numHashFunctions);
+                sstFiles, params.itemsPerPartition, params.bloomSize, params.numHashFunctions, params.bloomTreeRatio);
             spdlog::info("Hierarchy built for column: {}", col);
             return { col, std::move(hierarchy) }; }, column));
         }
@@ -431,10 +429,9 @@ void runExp5(std::string baseDir, bool initMode) {
 
         if (!initMode) {
             dbManager.insertRecords(params.numRecords, columns);
+            spdlog::info("ExpBloomMetrics: 10 second sleep...");
+            std::this_thread::sleep_for(std::chrono::seconds(10));
         }
-
-        spdlog::info("ExpBloomMetrics: 10 second sleep...");
-        std::this_thread::sleep_for(std::chrono::seconds(10));
 
         std::map<std::string, BloomTree> hierarchies;
         std::vector<std::future<std::pair<std::string, BloomTree>>> futures;
@@ -443,7 +440,7 @@ void runExp5(std::string baseDir, bool initMode) {
             futures.push_back(std::async(std::launch::async, [&dbManager, &bloomManager, &params](const std::string& col) -> std::pair<std::string, BloomTree> {
             auto sstFiles = dbManager.scanSSTFilesForColumn(params.dbName, col);
             BloomTree hierarchy = bloomManager.createPartitionedHierarchy(
-                sstFiles, params.itemsPerPartition, params.bloomSize, params.bloomTreeRatio, params.numHashFunctions);
+                sstFiles, params.itemsPerPartition, params.bloomSize, params.numHashFunctions, params.bloomTreeRatio);
             spdlog::info("Hierarchy built for column: {}", col);
             return { col, std::move(hierarchy) }; }, column));
         }
@@ -517,10 +514,9 @@ void runExp6(std::string baseDir, bool initMode) {
 
         if (!initMode) {
             dbManager.insertRecords(params.numRecords, columns);
+            spdlog::info("ExpBloomMetrics: 10 second sleep...");
+            std::this_thread::sleep_for(std::chrono::seconds(10));
         }
-
-        spdlog::info("ExpBloomMetrics: 10 second sleep...");
-        std::this_thread::sleep_for(std::chrono::seconds(10));
 
         std::map<std::string, BloomTree> hierarchies;
         std::vector<std::future<std::pair<std::string, BloomTree>>> futures;
@@ -529,7 +525,7 @@ void runExp6(std::string baseDir, bool initMode) {
             futures.push_back(std::async(std::launch::async, [&dbManager, &bloomManager, &params](const std::string& col) -> std::pair<std::string, BloomTree> {
             auto sstFiles = dbManager.scanSSTFilesForColumn(params.dbName, col);
             BloomTree hierarchy = bloomManager.createPartitionedHierarchy(
-                sstFiles, params.itemsPerPartition, params.bloomSize, params.bloomTreeRatio, params.numHashFunctions);
+                sstFiles, params.itemsPerPartition, params.bloomSize, params.numHashFunctions, params.bloomTreeRatio);
             spdlog::info("Hierarchy built for column: {}", col);
             return { col, std::move(hierarchy) }; }, column));
         }
@@ -603,10 +599,9 @@ void runExp7(std::string baseDir, bool initMode) {
 
         if (!initMode) {
             dbManager.insertRecordsWithSearchTargets(params.numRecords, columns, numItems, searchPattern);
+            spdlog::info("ExpBloomMetrics: 10 second sleep...");
+            std::this_thread::sleep_for(std::chrono::seconds(10));
         }
-
-        spdlog::info("ExpBloomMetrics: 10 second sleep...");
-        std::this_thread::sleep_for(std::chrono::seconds(10));
 
         std::map<std::string, BloomTree> hierarchies;
         std::vector<std::future<std::pair<std::string, BloomTree>>> futures;
@@ -615,7 +610,7 @@ void runExp7(std::string baseDir, bool initMode) {
             futures.push_back(std::async(std::launch::async, [&dbManager, &bloomManager, &params](const std::string& col) -> std::pair<std::string, BloomTree> {
             auto sstFiles = dbManager.scanSSTFilesForColumn(params.dbName, col);
             BloomTree hierarchy = bloomManager.createPartitionedHierarchy(
-                sstFiles, params.itemsPerPartition, params.bloomSize, params.bloomTreeRatio, params.numHashFunctions);
+                sstFiles, params.itemsPerPartition, params.bloomSize, params.numHashFunctions, params.bloomTreeRatio);
             spdlog::info("Hierarchy built for column: {}", col);
             return { col, std::move(hierarchy) }; }, column));
         }
@@ -694,10 +689,9 @@ void runExp8(std::string baseDir, bool initMode) {
 
         if (!initMode) {
             dbManager.insertRecords(params.numRecords, columns);
+            spdlog::info("ExpBloomMetrics: 10 second sleep...");
+            std::this_thread::sleep_for(std::chrono::seconds(10));
         }
-
-        spdlog::info("ExpBloomMetrics: 10 second sleep...");
-        std::this_thread::sleep_for(std::chrono::seconds(10));
 
         std::map<std::string, BloomTree> hierarchies;
         std::vector<std::future<std::pair<std::string, BloomTree>>> futures;
@@ -706,7 +700,7 @@ void runExp8(std::string baseDir, bool initMode) {
             futures.push_back(std::async(std::launch::async, [&dbManager, &bloomManager, &params](const std::string& col) -> std::pair<std::string, BloomTree> {
             auto sstFiles = dbManager.scanSSTFilesForColumn(params.dbName, col);
             BloomTree hierarchy = bloomManager.createPartitionedHierarchy(
-                sstFiles, params.itemsPerPartition, params.bloomSize, params.bloomTreeRatio, params.numHashFunctions);
+                sstFiles, params.itemsPerPartition, params.bloomSize, params.numHashFunctions, params.bloomTreeRatio);
             spdlog::info("Hierarchy built for column: {}", col);
             return { col, std::move(hierarchy) }; }, column));
         }
