@@ -3,6 +3,7 @@
 #include <spdlog/spdlog.h>
 
 #include <algorithm>
+#include <atomic>
 #include <functional>
 #include <future>
 #include <iostream>
@@ -14,6 +15,9 @@
 #include "db_manager.hpp"
 #include "node.hpp"
 #include "stopwatch.hpp"
+
+/// Global counter of bloom‐filter lookups performed
+inline std::atomic<size_t> gBloomCheckCount{0};
 
 // Combination of nodes
 struct Combo {
@@ -87,6 +91,7 @@ std::vector<std::string> finalSstScanAndIntersect(const Combo& combo,
 void dfsMultiColumn(const std::vector<std::string>& values, Combo currentCombo, DBManager& dbManager) {
     // check if all nodes pass Bloom
     for (size_t i = 0; i < currentCombo.nodes.size(); ++i) {
+        ++gBloomCheckCount;
         if (!currentCombo.nodes[i]->bloom.exists(values[i])) {
             return;  // Prune this branch.
         }
@@ -120,6 +125,7 @@ void dfsMultiColumn(const std::vector<std::string>& values, Combo currentCombo, 
         } else {
             for (Node* child : currentNode->children) {
                 // Only include the child if it passes the Bloom filter.
+                ++gBloomCheckCount;
                 if (child->bloom.exists(values[i])) {
                     candidateOptions[i].push_back(child);
                 }

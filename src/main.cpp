@@ -109,7 +109,7 @@ void runColumnTest(int attemptIndex,
 
 // ############# EXP1 ####################
 
-void runExp1(std::string baseDir) {
+void runExp1(std::string baseDir, bool initMode) {
     const std::vector<std::string> columns = {"phone", "mail", "address"};
     const std::vector<int> dbSizes = {1'000'000, 2'000'000, 3'000'000};
 
@@ -121,7 +121,10 @@ void runExp1(std::string baseDir) {
         spdlog::info("ExpBloomMetrics: Rozpoczynam eksperyment dla bazy '{}'", params.dbName);
 
         dbManager.openDB(params.dbName, params.compactionLogging);
-        dbManager.insertRecords(params.numRecords, columns);
+
+        if (!initMode) {
+            dbManager.insertRecords(params.numRecords, columns);
+        }
 
         spdlog::info("ExpBloomMetrics: 10 second sleep...");
         std::this_thread::sleep_for(std::chrono::seconds(10));
@@ -176,7 +179,7 @@ void runExp1(std::string baseDir) {
 // columns=3,bloomTreeRatio=3, numRecords=50M,
 // Kolumny:Rozmiar bazy danych| rozmiar filtrów Blooma na dysku | rozmiar filtrów Blooma w pamięci RAM
 //  Wiersze: dla itemsPerPartition: 50000, 100000, 200000
-void runExp2(std::string baseDir) {
+void runExp2(std::string baseDir, bool initMode) {
     const std::vector<std::string> columns = {"phone", "mail", "address"};
     int dbSize = 1'000'000;
     const std::vector<size_t> itemsPerPartition = {50000};
@@ -189,7 +192,10 @@ void runExp2(std::string baseDir) {
         spdlog::info("ExpBloomMetrics: Rozpoczynam eksperyment dla bazy '{}'", params.dbName);
 
         dbManager.openDB(params.dbName, params.compactionLogging);
-        dbManager.insertRecords(params.numRecords, columns);
+
+        if (!initMode) {
+            dbManager.insertRecords(params.numRecords, columns);
+        }
 
         spdlog::info("ExpBloomMetrics: 10 second sleep...");
         std::this_thread::sleep_for(std::chrono::seconds(10));
@@ -242,7 +248,7 @@ void runExp2(std::string baseDir) {
 // Założenia: columns=3,bloomTreeRatio=3, itemsPerPartition= 100000
 // Kolumny: Czas tworzenia bazy danych| Czas tworzenia fitrów Blooma na dysku | Czas tworzenia fitrów Blooma na pamięci RAM
 // Wiersze: dla numRecords: 10M, 50M, 100M, 500M
-void runExp3(std::string baseDir) {
+void runExp3(std::string baseDir, bool initMode) {
     const std::vector<std::string> columns = {"phone", "mail", "address"};
     const std::vector<int> dbSizes = {1'000'000, 4'000'000};
 
@@ -252,6 +258,12 @@ void runExp3(std::string baseDir) {
     for (const auto& dbSize : dbSizes) {
         TestParams params = {baseDir + "/exp3_db_" + std::to_string(dbSize), false, dbSize, 3, 1, 100000, 1'000'000, 6};
         spdlog::info("ExpBloomMetrics: Rozpoczynam eksperyment dla bazy '{}'", params.dbName);
+
+        // dbManager.openDB(params.dbName, params.compactionLogging);
+
+        // if (!initMode) {
+        //     dbManager.insertRecords(params.numRecords, columns);
+        // }
 
         StopWatch stopwatch;
         stopwatch.start();
@@ -304,7 +316,7 @@ void runExp3(std::string baseDir) {
 // Założenia: columns=3,bloomTreeRatio=3, itemsPerPartition= 100000
 // Kolumny: Global Scan| Hierarchical Single Column | Hierarchical Multi-Column
 // Wiersze: dla numRecords: 10M, 50M, 100M, 500M
-void runExp4(std::string baseDir) {
+void runExp4(std::string baseDir, bool initMode) {
     const std::vector<std::string> columns = {"phone", "mail", "address"};
     const std::vector<int> dbSizes = {1'000'000, 4'000'000};
 
@@ -316,7 +328,10 @@ void runExp4(std::string baseDir) {
         spdlog::info("ExpBloomMetrics: Rozpoczynam eksperyment dla bazy '{}'", params.dbName);
 
         dbManager.openDB(params.dbName, params.compactionLogging);
-        dbManager.insertRecords(params.numRecords, columns);
+
+        if (!initMode) {
+            dbManager.insertRecords(params.numRecords, columns);
+        }
 
         spdlog::info("ExpBloomMetrics: 10 second sleep...");
         std::this_thread::sleep_for(std::chrono::seconds(10));
@@ -359,16 +374,30 @@ void runExp4(std::string baseDir) {
         std::vector<std::string> globalMatches = dbManager.scanForRecordsInColumns(columns, expectedValues);
         stopwatch.stop();
         auto globalScanTime = stopwatch.elapsedMicros();
+        size_t bloomChecks = gBloomCheckCount.load();
+        spdlog::info("Global Total bloom‐filter checks this query: {}", bloomChecks);
+        // Reset for the next experiment if you like:
+        gBloomCheckCount = 0;
         // --- Hierarchical Multi-Column Query ---
         stopwatch.start();
         std::vector<std::string> hierarchicalMatches = multiColumnQueryHierarchical(queryTrees, expectedValues, "", "", dbManager);
         stopwatch.stop();
         auto hierarchicalMultiTime = stopwatch.elapsedMicros();
+        bloomChecks = gBloomCheckCount.load();
+        spdlog::info("Multi Total bloom‐filter checks this query: {}", bloomChecks);
+
+        // Reset for the next experiment if you like:
+        gBloomCheckCount = 0;
         // --- Hierarchical Single Column Query ---
         stopwatch.start();
         std::vector<std::string> singlehierarchyMatches = dbManager.findUsingSingleHierarchy(queryTrees[0], columns, expectedValues);
         stopwatch.stop();
         auto hierarchicalSingleTime = stopwatch.elapsedMicros();
+        bloomChecks = gBloomCheckCount.load();
+        spdlog::info("Single Total bloom‐filter checks this query: {}", bloomChecks);
+
+        // Reset for the next experiment if you like:
+        gBloomCheckCount = 0;
         // Zapis wyników do pliku CSV
         out << params.numRecords << ","
             << dbSize << ","
@@ -385,7 +414,7 @@ void runExp4(std::string baseDir) {
 // Założenia: columns=3,bloomTreeRatio=3, numRecords= 50M
 // Kolumny: Global Scan| Hierarchical Single Column | Hierarchical Multi-Column
 // Wiersze: dla itemsPerPartition: 50000, 100000, 200000
-void runExp5(std::string baseDir) {
+void runExp5(std::string baseDir, bool initMode) {
     const std::vector<std::string> columns = {"phone", "mail", "address"};
     const int dbSize = 4'000'000;
     const int bloomSize = 1'000'000;
@@ -399,7 +428,10 @@ void runExp5(std::string baseDir) {
         spdlog::info("ExpBloomMetrics: Rozpoczynam eksperyment dla bazy '{}'", params.dbName);
 
         dbManager.openDB(params.dbName, params.compactionLogging);
-        dbManager.insertRecords(params.numRecords, columns);
+
+        if (!initMode) {
+            dbManager.insertRecords(params.numRecords, columns);
+        }
 
         spdlog::info("ExpBloomMetrics: 10 second sleep...");
         std::this_thread::sleep_for(std::chrono::seconds(10));
@@ -469,7 +501,7 @@ void runExp5(std::string baseDir) {
 // Kolumny: Global Scan| Hierarchical Single Column | Hierarchical Multi-Column
 // Wiersze: dla bloomSize: 500000, 1000000, 2000000
 
-void runExp6(std::string baseDir) {
+void runExp6(std::string baseDir, bool initMode) {
     const std::vector<std::string> columns = {"phone", "mail", "address"};
     const int dbSize = 4'000'000;
     const std::vector<size_t> bloomSizes = {500000, 1000000, 2000000};
@@ -482,7 +514,10 @@ void runExp6(std::string baseDir) {
         spdlog::info("ExpBloomMetrics: Rozpoczynam eksperyment dla bazy '{}'", params.dbName);
 
         dbManager.openDB(params.dbName, params.compactionLogging);
-        dbManager.insertRecords(params.numRecords, columns);
+
+        if (!initMode) {
+            dbManager.insertRecords(params.numRecords, columns);
+        }
 
         spdlog::info("ExpBloomMetrics: 10 second sleep...");
         std::this_thread::sleep_for(std::chrono::seconds(10));
@@ -551,7 +586,7 @@ void runExp6(std::string baseDir) {
 // Założenia: columns=3,bloomTreeRatio=3, numRecords= 50M,  itemsPerPartition= 100000
 // Kolumny: Global Scan| Hierarchical Single Column | Hierarchical Multi-Column
 // Wiersze: ilość itemów spełniających kryteria: 2, 4, 6, 8, 10
-void runExp7(std::string baseDir) {
+void runExp7(std::string baseDir, bool initMode) {
     const int dbSize = 4'000'000;
     const std::vector<std::string> columns = {"phone", "mail", "address"};
     const std::vector<int> targetItems = {2, 4, 6, 8, 10};
@@ -565,7 +600,10 @@ void runExp7(std::string baseDir) {
         spdlog::info("ExpBloomMetrics: Rozpoczynam eksperyment dla bazy '{}'", params.dbName);
 
         dbManager.openDB(params.dbName, params.compactionLogging);
-        dbManager.insertRecordsWithSearchTargets(params.numRecords, columns, numItems, searchPattern);
+
+        if (!initMode) {
+            dbManager.insertRecordsWithSearchTargets(params.numRecords, columns, numItems, searchPattern);
+        }
 
         spdlog::info("ExpBloomMetrics: 10 second sleep...");
         std::this_thread::sleep_for(std::chrono::seconds(10));
@@ -632,7 +670,7 @@ void runExp7(std::string baseDir) {
 // Założenia: bloomTreeRatio=3, numRecords= 50M,  itemsPerPartition= 100000
 // Kolumny: Global Scan| Hierarchical Single Column | Hierarchical Multi-Column
 // Wiersze: ilość kolumn: 2,4,8,10
-void runExp8(std::string baseDir) {
+void runExp8(std::string baseDir, bool initMode) {
     const int dbSize = 4'000'000;
     const std::vector<int> numColumns = {2, 4, 8, 10};
 
@@ -653,7 +691,10 @@ void runExp8(std::string baseDir) {
         spdlog::info("ExpBloomMetrics: Rozpoczynam eksperyment dla bazy '{}'", params.dbName);
 
         dbManager.openDB(params.dbName, params.compactionLogging, columns);
-        dbManager.insertRecords(params.numRecords, columns);
+
+        if (!initMode) {
+            dbManager.insertRecords(params.numRecords, columns);
+        }
 
         spdlog::info("ExpBloomMetrics: 10 second sleep...");
         std::this_thread::sleep_for(std::chrono::seconds(10));
@@ -718,21 +759,28 @@ void runExp8(std::string baseDir) {
 }
 
 // ##### Main function ####
-int main() {
+int main(int argc, char* argv[]) {
     const std::string baseDir = "db";
     if (!std::filesystem::exists(baseDir)) {
         std::filesystem::create_directory(baseDir);
     }
+    bool initMode = false;
+    for (int i = 1; i < argc; ++i) {
+        if (std::string(argv[i]) == "--init") {
+            initMode = true;
+            break;
+        }
+    }
     try {
         // run section
-        // runExp1(baseDir);
-        // runExp2(baseDir);
-        // runExp3(baseDir);
-        // runExp4(baseDir);
-        // runExp5(baseDir);
-        // runExp6(baseDir);
-        runExp7(baseDir);
-        // runExp8(baseDir);
+        runExp1(baseDir, initMode);
+        // runExp2(baseDir, initMode);
+        // runExp3(baseDir, initMode);
+        // runExp4(baseDir, initMode);
+        // runExp5(baseDir, initMode);
+        // runExp6(baseDir, initMode);
+        // runExp7(baseDir, initMode);
+        // runExp8(baseDir, initMode);
     } catch (const std::exception& e) {
         spdlog::error("[Error] {}", e.what());
         return EXIT_FAILURE;

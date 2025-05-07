@@ -3,11 +3,14 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <atomic>
 #include <climits>
 #include <cstdio>
 #include <filesystem>
 #include <iostream>
 #include <stdexcept>
+
+extern std::atomic<size_t> gBloomCheckCount;  // declared in algorithm.hpp
 
 void BloomTree::addLeafNode(BloomFilter&& bv, const std::string& file,
                             const std::string& start, const std::string& end) {
@@ -61,12 +64,15 @@ void BloomTree::search(Node* node, const std::string& value,
         (qEnd.empty() || node->startKey <= qEnd) &&
         (qStart.empty() || node->endKey >= qStart);
 
-    if (overlaps && node->bloom.exists(value)) {
-        if (node->filename != "Memory") {
-            results.push_back(node->filename);
-        } else {
-            for (Node* child : node->children) {
-                search(child, value, qStart, qEnd, results);
+    if (overlaps) {
+        ++gBloomCheckCount;
+        if (node->bloom.exists(value)) {
+            if (node->filename != "Memory") {
+                results.push_back(node->filename);
+            } else {
+                for (Node* child : node->children) {
+                    search(child, value, qStart, qEnd, results);
+                }
             }
         }
     }
@@ -90,12 +96,15 @@ void BloomTree::searchNodes(Node* node, const std::string& value,
         (qEnd.empty() || node->startKey <= qEnd) &&
         (qStart.empty() || node->endKey >= qStart);
 
-    if (overlaps && node->bloom.exists(value)) {
-        if (node->children.empty()) {
-            results.push_back(node);
-        } else {
-            for (Node* child : node->children) {
-                searchNodes(child, value, qStart, qEnd, results);
+    if (overlaps) {
+        ++gBloomCheckCount;
+        if (node->bloom.exists(value)) {
+            if (node->children.empty()) {
+                results.push_back(node);
+            } else {
+                for (Node* child : node->children) {
+                    searchNodes(child, value, qStart, qEnd, results);
+                }
             }
         }
     }
@@ -113,7 +122,7 @@ std::vector<const Node*> BloomTree::queryNodes(const std::string& value,
 static size_t computeNodeMemory(const Node* node) {
     if (!node) return 0;
     size_t mem = 0;
-    
+
     mem += node->bloom.bitArray.capacity() / CHAR_BIT;
     mem += sizeof(node->bloom.bitArray);
 
