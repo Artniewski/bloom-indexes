@@ -16,6 +16,22 @@
 #include "compaction_event_listener.hpp"
 #include "stopwatch.hpp"
 
+void DBManager::compactAllColumnFamilies() {
+    if (!db_) throw std::runtime_error("DB not open");
+    rocksdb::CompactRangeOptions opts;
+    for (auto& kv : cf_handles_) {
+        auto* handle = kv.second.get();
+        auto status = db_->CompactRange(opts, handle, /*begin=*/ nullptr, /*end=*/ nullptr);
+        if (!status.ok()) {
+            spdlog::error("Compaction failed for CF '{}': {}", kv.first, status.ToString());
+        } else {
+            spdlog::info("Compaction succeeded for CF '{}'", kv.first);
+        }
+    }
+    auto s = db_->EnableFileDeletions();
+    assert(s.ok());
+}
+
 void DBManager::openDB(const std::string& dbname, bool withListener, std::vector<std::string> columns) {
     StopWatch sw;
     sw.start();

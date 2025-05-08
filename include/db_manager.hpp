@@ -13,9 +13,10 @@
 
 class DBManager {
    public:
+    void compactAllColumnFamilies();
     void openDB(const std::string &dbname, bool withListener = false, std::vector<std::string> columns = {"phone", "mail", "address", "name", "surname"});
     void insertRecords(int numRecords, std::vector<std::string> columns);
-    void insertRecordsWithSearchTargets(int numRecords, const std::vector<std::string>& columns, int targetCount, std::string searchPattern);
+    void insertRecordsWithSearchTargets(int numRecords, const std::vector<std::string> &columns, int targetCount, std::string searchPattern);
     std::vector<std::string> scanSSTFilesForColumn(const std::string &dbname, const std::string &column);
     bool isOpen() const { return static_cast<bool>(db_); }
     void closeDB();

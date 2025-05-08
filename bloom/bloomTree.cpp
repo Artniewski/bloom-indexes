@@ -132,10 +132,6 @@ static size_t computeNodeMemory(const Node* node) {
     return mem;
 }
 
-size_t BloomTree::memorySize() const {
-    return computeNodeMemory(root);
-}
-
 static size_t computeBloomFilterDiskSize(const BloomFilter& bf) {
     char tmpName[] = "/tmp/bloomXXXXXX";
     int fd = mkstemp(tmpName);
@@ -151,6 +147,23 @@ static size_t computeBloomFilterDiskSize(const BloomFilter& bf) {
     std::remove(tmpName);
 
     return size;
+}
+
+size_t BloomTree::memorySize() const {
+    size_t total = 0;
+    std::vector<const Node*> stack;
+    stack.push_back(root);
+    while (!stack.empty()) {
+        const Node* node = stack.back();
+        stack.pop_back();
+        if (node->filename == "Memory") {
+            total += computeBloomFilterDiskSize(node->bloom);
+            for (const Node* child : node->children) {
+                stack.push_back(child);
+            }
+        }
+    }
+    return total;
 }
 
 size_t BloomTree::diskSize() const {
