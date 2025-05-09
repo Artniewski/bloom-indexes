@@ -5,6 +5,7 @@
 #include <future>
 #include <iostream>
 #include <map>
+#include <regex>
 #include <string>
 #include <thread>
 #include <vector>
@@ -26,6 +27,28 @@ struct TestParams {
     size_t bloomSize;
     int numHashFunctions;
 };
+
+void clearBloomFilterFiles(const std::string& dbDir) {
+    std::regex bloomFilePattern(R"(^\d+\.sst_[^_]+_[^_]+$)");
+    std::error_code ec;
+
+    for (auto const& entry : std::filesystem::directory_iterator(dbDir, ec)) {
+        if (ec) {
+            spdlog::error("Failed to iterate '{}': {}", dbDir, ec.message());
+            return;
+        }
+
+        auto const& path = entry.path();
+        auto filename = path.filename().string();
+
+        if (entry.is_regular_file() && std::regex_match(filename, bloomFilePattern)) {
+            if (std::filesystem::remove(path, ec)) {
+            } else {
+                spdlog::error("Could not remove '{}': {}", path.string(), ec.message());
+            }
+        }
+    }
+}
 
 void runColumnTest(int attemptIndex,
                    const TestParams& params,
@@ -128,7 +151,7 @@ void runExp1(std::string baseDir, bool initMode) {
     for (const auto& dbSize : dbSizes) {
         TestParams params = {baseDir + "/exp1_db_" + std::to_string(dbSize), true, dbSize, 3, 1, 100000, 1'000'000, 6};
         spdlog::info("ExpBloomMetrics: Rozpoczynam eksperyment dla bazy '{}'", params.dbName);
-
+        clearBloomFilterFiles(params.dbName);
         dbManager.openDB(params.dbName, params.compactionLogging, columns);
 
         if (!initMode) {
@@ -208,6 +231,7 @@ void runExp2(std::string baseDir, bool initMode) {
         TestParams params = {baseDir + "/exp2_db_" + std::to_string(items), false, dbSize, 3, 1, items, 1000000, 6};
         spdlog::info("ExpBloomMetrics: Rozpoczynam eksperyment dla bazy '{}'", params.dbName);
 
+        clearBloomFilterFiles(params.dbName);
         dbManager.openDB(params.dbName, params.compactionLogging);
 
         if (!initMode) {
@@ -342,7 +366,8 @@ void runExp4(std::string baseDir, bool initMode) {
     for (const auto& dbSize : dbSizes) {
         TestParams params = {baseDir + "/exp4_db_" + std::to_string(dbSize), false, dbSize, 3, 1, 100000, 1'000'000, 6};
         spdlog::info("ExpBloomMetrics: Rozpoczynam eksperyment dla bazy '{}'", params.dbName);
-
+        
+        clearBloomFilterFiles(params.dbName);
         dbManager.openDB(params.dbName, params.compactionLogging);
 
         if (!initMode) {
@@ -442,6 +467,7 @@ void runExp5(std::string baseDir, bool initMode) {
         TestParams params = {baseDir + "/exp5_db_" + std::to_string(partitionSize), false, dbSize, 3, 1, partitionSize, bloomSize, 6};
         spdlog::info("ExpBloomMetrics: Rozpoczynam eksperyment dla bazy '{}'", params.dbName);
 
+        clearBloomFilterFiles(params.dbName);
         dbManager.openDB(params.dbName, params.compactionLogging);
 
         if (!initMode) {
@@ -527,6 +553,7 @@ void runExp6(std::string baseDir, bool initMode) {
         TestParams params = {baseDir + "/exp6_db_" + std::to_string(bloomSize), false, dbSize, 3, 1, 100000, bloomSize, 6};
         spdlog::info("ExpBloomMetrics: Rozpoczynam eksperyment dla bazy '{}'", params.dbName);
 
+        clearBloomFilterFiles(params.dbName);
         dbManager.openDB(params.dbName, params.compactionLogging);
 
         if (!initMode) {
@@ -602,7 +629,7 @@ void runExp6(std::string baseDir, bool initMode) {
 void runExp7(std::string baseDir, bool initMode) {
     const int dbSize = 4'000'000;
     const std::vector<std::string> columns = {"phone", "mail", "address"};
-    const std::vector<int> targetItems = {2, 4, 6, 8, 10};
+    const std::vector<int> targetItems = {10, 8, 6, 4, 2};
     std::string searchPattern = std::string(1000, 'X');
 
     DBManager dbManager;
@@ -612,6 +639,7 @@ void runExp7(std::string baseDir, bool initMode) {
         TestParams params = {baseDir + "/exp7_db_" + std::to_string(numItems), false, dbSize, 3, 1, 100000, 1'000'000, 6};
         spdlog::info("ExpBloomMetrics: Rozpoczynam eksperyment dla bazy '{}'", params.dbName);
 
+        clearBloomFilterFiles(params.dbName);
         dbManager.openDB(params.dbName, params.compactionLogging);
 
         if (!initMode) {
@@ -701,7 +729,7 @@ void runExp8(std::string baseDir, bool initMode) {
 
         TestParams params = {baseDir + "/exp8_db_" + std::to_string(numCol), false, dbSize, 3, 1, 100000, 1'000'000, 6};
         spdlog::info("ExpBloomMetrics: Rozpoczynam eksperyment dla bazy '{}'", params.dbName);
-
+        clearBloomFilterFiles(params.dbName);
         dbManager.openDB(params.dbName, params.compactionLogging, columns);
 
         if (!initMode) {
@@ -784,13 +812,13 @@ int main(int argc, char* argv[]) {
     }
     try {
         // run section
-        runExp1(baseDir, initMode);
+        // runExp1(baseDir, initMode);
         // runExp2(baseDir, initMode);
         // runExp3(baseDir, initMode);
         // runExp4(baseDir, initMode);
         // runExp5(baseDir, initMode);
         // runExp6(baseDir, initMode);
-        // runExp7(baseDir, initMode);
+        runExp7(baseDir, initMode);
         // runExp8(baseDir, initMode);
     } catch (const std::exception& e) {
         spdlog::error("[Error] {}", e.what());
