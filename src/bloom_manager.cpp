@@ -5,12 +5,15 @@
 
 #include <future>
 #include <vector>
+#include <boost/asio/thread_pool.hpp>
+#include <boost/asio/post.hpp>
 
 #include "bloomTree.hpp"
 #include "bloom_value.hpp"
 #include "stopwatch.hpp"
 
-// New separate method to process an SST file:
+extern boost::asio::thread_pool globalThreadPool;
+
 std::vector<Node*> BloomManager::processSSTFile(const std::string& sstFile,
                                                 size_t partitionSize,
                                                 size_t bloomSize,
@@ -70,9 +73,25 @@ BloomTree BloomManager::createPartitionedHierarchy(const std::vector<std::string
     BloomTree hierarchy(branchingRatio, bloomSize, numHashFunctions);
 
     std::vector<std::future<std::vector<Node*>>> futures;
+    futures.reserve(sstFiles.size());
+
     for (const auto& sstFile : sstFiles) {
-        futures.push_back(std::async(std::launch::async, &BloomManager::processSSTFile,
-                                     this, sstFile, partitionSize, bloomSize, numHashFunctions));
+        auto task = std::make_shared<
+            std::packaged_task<std::vector<Node*>()>
+        >(
+            std::bind(&BloomManager::processSSTFile,
+                      this,
+                      sstFile,
+                      partitionSize,
+                      bloomSize,
+                      numHashFunctions)
+        );
+
+        futures.emplace_back(task->get_future());
+
+        boost::asio::post(globalThreadPool,
+            [task]() { (*task)(); }
+        );
     }
 
     std::vector<Node*> allLeafNodes;

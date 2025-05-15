@@ -12,6 +12,7 @@
 #include <future>
 #include <stdexcept>
 #include <unordered_set>
+#include <random>
 
 #include "compaction_event_listener.hpp"
 #include "stopwatch.hpp"
@@ -91,7 +92,7 @@ void DBManager::insertRecords(int numRecords, std::vector<std::string> columns) 
 
         const std::string key = "key" + prefixedIndex;
         for (const auto& column : columns) {
-            const std::string value = column + "_value" + index + std::string(1000, 'a');
+            const std::string value = column + "_value" + index;
             auto handle = cf_handles_.at(column).get();
             batch.Put(handle, key, value);
         }
@@ -118,19 +119,17 @@ void DBManager::insertRecords(int numRecords, std::vector<std::string> columns) 
     spdlog::critical("Inserted {} records across CFs in {} µs.", numRecords, sw.elapsedMicros());
 }
 
-void DBManager::insertRecordsWithSearchTargets(int numRecords, const std::vector<std::string>& columns, int targetCount, std::string searchPattern) {
+void DBManager::insertRecordsWithSearchTargets(int numRecords, const std::vector<std::string>& columns, const std::unordered_set<int>& targetIndices) {
     if (!db_) throw std::runtime_error("DB not open.");
 
     StopWatch sw;
     sw.start();
-    spdlog::info("Inserting {} records across {} CFs... with {} search targets", numRecords, columns.size(), targetCount);
-
-    int targetModulo = numRecords / targetCount;
+    spdlog::info("Inserting {} records across {} CFs... with {} search targets", numRecords, columns.size(), targetIndices.size());
 
     rocksdb::WriteBatch batch;
     for (int i = 1; i <= numRecords; ++i) {
-
-        bool isTarget = (i % targetModulo == 0);
+        bool isTarget = targetIndices.find(i) != targetIndices.end();
+        
         // prefix index with 0s to ensure lexicographical order based on numRecords size
         const std::string index = std::to_string(i);
         const std::string prefixedIndex = std::string(20 - index.size(), '0') + std::to_string(i);
@@ -138,12 +137,16 @@ void DBManager::insertRecordsWithSearchTargets(int numRecords, const std::vector
         const std::string key = "key" + prefixedIndex;
         for (const auto& column : columns) {
             auto handle = cf_handles_.at(column).get();
-            const std::string value = column + "_value" + index + std::string(1000, 'a');
-            if(isTarget){
-                batch.Put(handle, key, searchPattern);
+            std::string value;
+            
+            if (isTarget) {
+                value = column + "_target";
+                spdlog::debug("Creating target value: {} for key: {}", value, key);
             } else {
-                batch.Put(handle, key, value);
+                value = column + "_value" + index;
             }
+            
+            batch.Put(handle, key, value);
         }
         if (i % 1000000 == 0) {
             auto s = db_->Write(rocksdb::WriteOptions(), &batch);

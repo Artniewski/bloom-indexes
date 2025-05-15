@@ -11,10 +11,15 @@
 #include <unordered_set>
 #include <vector>
 
+#include <boost/asio/thread_pool.hpp>
+#include <boost/asio/post.hpp>
+
 #include "bloomTree.hpp"
 #include "db_manager.hpp"
 #include "node.hpp"
 #include "stopwatch.hpp"
+
+extern boost::asio::thread_pool globalThreadPool;
 
 /// Global counter of bloom‐filter lookups performed
 inline std::atomic<size_t> gBloomCheckCount{0};
@@ -43,21 +48,26 @@ std::vector<std::string> finalSstScanAndIntersect(const Combo& combo,
                                                   DBManager& dbManager) {
     size_t n = combo.nodes.size();
 
+    std::vector<std::promise<std::unordered_set<std::string>>> promises(n);
     std::vector<std::future<std::unordered_set<std::string>>> futures;
     futures.reserve(n);
-
+    
     for (size_t i = 0; i < n; ++i) {
+        futures.push_back(promises[i].get_future());
         Node* leaf = combo.nodes[i];
         std::string scanStart = std::max(combo.rangeStart, leaf->startKey);
         std::string scanEnd = std::min(combo.rangeEnd, leaf->endKey);
-        futures.push_back(std::async(
-            std::launch::async,
-            [leaf, &values, i, scanStart, scanEnd, &dbManager]()
-                -> std::unordered_set<std::string> {
-                // Scan the SST file for keys matching the value.
-                std::vector<std::string> keys = dbManager.scanFileForKeysWithValue(leaf->filename, values[i], scanStart, scanEnd);
-                return std::unordered_set<std::string>(keys.begin(), keys.end());
-            }));
+        
+        boost::asio::post(globalThreadPool,
+            [leaf, values, i, scanStart, scanEnd, &dbManager, promise = std::move(promises[i])]() mutable {
+                try {
+                    // Scan the SST file for keys matching the value.
+                    std::vector<std::string> keys = dbManager.scanFileForKeysWithValue(leaf->filename, values[i], scanStart, scanEnd);
+                    promise.set_value(std::unordered_set<std::string>(keys.begin(), keys.end()));
+                } catch (const std::exception& e) {
+                    promise.set_exception(std::current_exception());
+                }
+            });
     }
 
     // Collect the key sets from all futures.

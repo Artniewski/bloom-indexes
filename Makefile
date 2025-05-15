@@ -1,8 +1,8 @@
 # Variables
 CXX = clang++
 
-CXXFLAGS = -std=c++17  -I/usr/local/include/rocksdb -Iinclude -Ibloom -I/usr/include/spdlog 
-LDFLAGS = -L/usr/local/lib  -lz -lbz2 -lsnappy -llz4 -lzstd -pthread -ldl -fvisibility=hidden -fvisibility-inlines-hidden -lrocksdb -lfmt 
+CXXFLAGS = -std=c++20  -I/usr/local/include/rocksdb -Iinclude -Ibloom -I/usr/include/spdlog
+LDFLAGS = -L/usr/local/lib  -lz -lbz2 -lsnappy -llz4 -lzstd -pthread -ldl -fvisibility=hidden -fvisibility-inlines-hidden -lrocksdb -lfmt -lboost_system -lboost_thread
 
 TARGET = HierarchicalDB
 SRC = \
@@ -10,6 +10,7 @@ SRC = \
     src/bloom_manager.cpp \
     src/compaction_event_listener.cpp \
     src/main.cpp \
+    src/exp7.cpp \
     src/TestRunner.cpp \
     bloom/bloomTree.cpp \
     bloom/bloom_value.cpp \

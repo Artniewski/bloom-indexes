@@ -9,12 +9,16 @@
 #include <string>
 #include <thread>
 #include <vector>
+#include <random>
 
 #include "algorithm.hpp"
 #include "bloomTree.hpp"
 #include "bloom_manager.hpp"
 #include "db_manager.hpp"
+#include "exp7.hpp"
 #include "stopwatch.hpp"
+
+boost::asio::thread_pool globalThreadPool{std::thread::hardware_concurrency()};
 
 // Test parameter structure.
 struct TestParams {
@@ -402,7 +406,7 @@ void runExp4(std::string baseDir, bool initMode) {
         // hierarchies vector
         std::vector<BloomTree> queryTrees;
         std::vector<std::string> expectedValues;
-        std::string expectedValueSuffix = "_value" + std::to_string(dbSize / 2) + std::string(1000, 'a');
+        std::string expectedValueSuffix = "_value" + std::to_string(dbSize / 2);
         for (const auto& column : columns) {
             queryTrees.push_back(hierarchies.at(column));
             expectedValues.push_back(column + expectedValueSuffix);
@@ -502,7 +506,7 @@ void runExp5(std::string baseDir, bool initMode) {
         // hierarchies vector
         std::vector<BloomTree> queryTrees;
         std::vector<std::string> expectedValues;
-        std::string expectedValueSuffix = "_value" + std::to_string(dbSize / 2) + std::string(1000, 'a');
+        std::string expectedValueSuffix = "_value" + std::to_string(dbSize / 2);
         for (const auto& column : columns) {
             queryTrees.push_back(hierarchies.at(column));
             expectedValues.push_back(column + expectedValueSuffix);
@@ -588,7 +592,7 @@ void runExp6(std::string baseDir, bool initMode) {
         // hierarchies vector
         std::vector<BloomTree> queryTrees;
         std::vector<std::string> expectedValues;
-        std::string expectedValueSuffix = "_value" + std::to_string(dbSize / 2) + std::string(1000, 'a');
+        std::string expectedValueSuffix = "_value" + std::to_string(dbSize / 2);
         for (const auto& column : columns) {
             queryTrees.push_back(hierarchies.at(column));
             expectedValues.push_back(column + expectedValueSuffix);
@@ -624,86 +628,7 @@ void runExp6(std::string baseDir, bool initMode) {
 // ############# EXP7 ####################
 // Cel: Porównanie metod przeszukiwania (ilość szukanych itemow: 10)
 // Założenia: columns=3,bloomTreeRatio=3, numRecords= 50M,  itemsPerPartition= 100000
-// Kolumny: Global Scan| Hierarchical Single Column | Hierarchical Multi-Column
-// Wiersze: ilość itemów spełniających kryteria: 2, 4, 6, 8, 10
-void runExp7(std::string baseDir, bool initMode) {
-    const int dbSize = 4'000'000;
-    const std::vector<std::string> columns = {"phone", "mail", "address"};
-    const std::vector<int> targetItems = {10, 8, 6, 4, 2};
-    std::string searchPattern = std::string(1000, 'X');
-
-    DBManager dbManager;
-    BloomManager bloomManager;
-
-    for (const auto& numItems : targetItems) {
-        TestParams params = {baseDir + "/exp7_db_" + std::to_string(numItems), false, dbSize, 3, 1, 100000, 1'000'000, 6};
-        spdlog::info("ExpBloomMetrics: Rozpoczynam eksperyment dla bazy '{}'", params.dbName);
-
-        clearBloomFilterFiles(params.dbName);
-        dbManager.openDB(params.dbName, params.compactionLogging);
-
-        if (!initMode) {
-            dbManager.insertRecordsWithSearchTargets(params.numRecords, columns, numItems, searchPattern);
-            spdlog::info("ExpBloomMetrics: 10 second sleep...");
-            std::this_thread::sleep_for(std::chrono::seconds(10));
-        }
-
-        std::map<std::string, BloomTree> hierarchies;
-        std::vector<std::future<std::pair<std::string, BloomTree>>> futures;
-
-        for (const auto& column : columns) {
-            futures.push_back(std::async(std::launch::async, [&dbManager, &bloomManager, &params](const std::string& col) -> std::pair<std::string, BloomTree> {
-            auto sstFiles = dbManager.scanSSTFilesForColumn(params.dbName, col);
-            BloomTree hierarchy = bloomManager.createPartitionedHierarchy(
-                sstFiles, params.itemsPerPartition, params.bloomSize, params.numHashFunctions, params.bloomTreeRatio);
-            spdlog::info("Hierarchy built for column: {}", col);
-            return { col, std::move(hierarchy) }; }, column));
-        }
-
-        for (auto& fut : futures) {
-            auto [col, tree] = fut.get();
-            hierarchies.try_emplace(col, std::move(tree));
-        }
-
-        std::ofstream out(baseDir + "/exp_7_bloom_metrics.csv", std::ios::app);
-        if (!out) {
-            spdlog::error("ExpBloomMetrics: Nie udało się otworzyć pliku wynikowego!");
-            return;
-        }
-
-        // hierarchies vector
-        std::vector<BloomTree> queryTrees;
-        std::vector<std::string> expectedValues;
-        std::string expectedValueSuffix = "_value" + std::to_string(dbSize / 2) + std::string(1000, 'a');
-        for (const auto& column : columns) {
-            queryTrees.push_back(hierarchies.at(column));
-            expectedValues.push_back(searchPattern);
-        }
-
-        // --- Global Scan Query ---
-        StopWatch stopwatch;
-        stopwatch.start();
-        std::vector<std::string> globalMatches = dbManager.scanForRecordsInColumns(columns, expectedValues);
-        stopwatch.stop();
-        auto globalScanTime = stopwatch.elapsedMicros();
-        // --- Hierarchical Multi-Column Query ---
-        stopwatch.start();
-        std::vector<std::string> hierarchicalMatches = multiColumnQueryHierarchical(queryTrees, expectedValues, "", "", dbManager);
-        stopwatch.stop();
-        auto hierarchicalMultiTime = stopwatch.elapsedMicros();
-        // --- Hierarchical Single Column Query ---
-        stopwatch.start();
-        std::vector<std::string> singlehierarchyMatches = dbManager.findUsingSingleHierarchy(queryTrees[0], columns, expectedValues);
-        stopwatch.stop();
-        auto hierarchicalSingleTime = stopwatch.elapsedMicros();
-        // Zapis wyników do pliku CSV
-        out << params.numRecords << ","
-            << numItems << ","
-            << globalScanTime << ","
-            << hierarchicalSingleTime << ","
-            << hierarchicalMultiTime << "\n";
-    }
-}
+// Implementation moved to src/exp7.cpp
 
 // ############# EXP8 ####################
 // Cel: Porównanie metod przeszukiwania (jedna szukana wartość istniejąca w bazie)
@@ -764,7 +689,7 @@ void runExp8(std::string baseDir, bool initMode) {
         // hierarchies vector
         std::vector<BloomTree> queryTrees;
         std::vector<std::string> expectedValues;
-        std::string expectedValueSuffix = "_value" + std::to_string(dbSize / 2) + std::string(1000, 'a');
+        std::string expectedValueSuffix = "_value" + std::to_string(dbSize / 2);
         for (const auto& column : columns) {
             queryTrees.push_back(hierarchies.at(column));
             expectedValues.push_back(column + expectedValueSuffix);

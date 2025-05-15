@@ -3,8 +3,11 @@
 
 #include <string>
 #include <vector>
+#include <boost/asio/thread_pool.hpp>
 
 #include "bloomTree.hpp"
+
+extern boost::asio::thread_pool globalThreadPool;
 
 class BloomManager {
    public:
