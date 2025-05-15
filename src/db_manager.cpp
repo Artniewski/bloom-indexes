@@ -28,7 +28,7 @@ void DBManager::compactAllColumnFamilies() {
             spdlog::info("Compaction succeeded for CF '{}'", kv.first);
         }
     }
-    auto s = db_->EnableFileDeletions();
+    auto s = db_->EnableFileDeletions(true);
     assert(s.ok());
 }
 
