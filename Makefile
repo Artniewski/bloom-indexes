@@ -10,7 +10,14 @@ SRC = \
     src/bloom_manager.cpp \
     src/compaction_event_listener.cpp \
     src/main.cpp \
+    src/exp1.cpp \
+    src/exp2.cpp \
+    src/exp3.cpp \
+    src/exp4.cpp \
+    src/exp5.cpp \
+    src/exp6.cpp \
     src/exp7.cpp \
+    src/exp8.cpp \
     src/TestRunner.cpp \
     bloom/bloomTree.cpp \
     bloom/bloom_value.cpp \

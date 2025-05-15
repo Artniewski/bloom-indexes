@@ -33,7 +33,7 @@ struct Combo {
 
 inline std::vector<std::string> globalfinalMatches;
 
-void computeIntersection(const std::vector<Node*>& nodes, std::string& outStart, std::string& outEnd) {
+inline void computeIntersection(const std::vector<Node*>& nodes, std::string& outStart, std::string& outEnd) {
     if (nodes.empty()) return;
     outStart = nodes[0]->startKey;
     outEnd = nodes[0]->endKey;
@@ -43,7 +43,7 @@ void computeIntersection(const std::vector<Node*>& nodes, std::string& outStart,
     }
 }
 
-std::vector<std::string> finalSstScanAndIntersect(const Combo& combo,
+inline std::vector<std::string> finalSstScanAndIntersect(const Combo& combo,
                                                   const std::vector<std::string>& values,
                                                   DBManager& dbManager) {
     size_t n = combo.nodes.size();
@@ -98,7 +98,7 @@ std::vector<std::string> finalSstScanAndIntersect(const Combo& combo,
 
 // DFS with combinations level by level,
 // using only children that pass the Bloom filter.
-void dfsMultiColumn(const std::vector<std::string>& values, Combo currentCombo, DBManager& dbManager) {
+inline void dfsMultiColumn(const std::vector<std::string>& values, Combo currentCombo, DBManager& dbManager) {
     // check if all nodes pass Bloom
     for (size_t i = 0; i < currentCombo.nodes.size(); ++i) {
         ++gBloomCheckCount;
@@ -172,7 +172,7 @@ void dfsMultiColumn(const std::vector<std::string>& values, Combo currentCombo, 
 }
 
 // Multi-column hierarchical query interface.
-std::vector<std::string> multiColumnQueryHierarchical(std::vector<BloomTree>& trees,
+inline std::vector<std::string> multiColumnQueryHierarchical(std::vector<BloomTree>& trees,
                                                       const std::vector<std::string>& values,
                                                       const std::string& globalStart,
                                                       const std::string& globalEnd,

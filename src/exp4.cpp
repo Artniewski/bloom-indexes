@@ -6,7 +6,6 @@
 #include <future>
 #include <iostream>
 #include <map>
-#include <random>
 #include <string>
 #include <thread>
 #include <vector>
@@ -14,15 +13,14 @@
 #include <boost/asio/thread_pool.hpp>
 #include <boost/asio/post.hpp>
 
-#include "algorithm.hpp"
 #include "bloomTree.hpp"
 #include "bloom_manager.hpp"
 #include "db_manager.hpp"
 #include "stopwatch.hpp"
+#include "algorithm.hpp"
 
 
 
-// Import necessary declarations from main.cpp
 struct TestParams {
     std::string dbName;
     bool compactionLogging;
@@ -35,63 +33,25 @@ struct TestParams {
 };
 
 extern void clearBloomFilterFiles(const std::string& dbDir);
+extern std::atomic<size_t> gBloomCheckCount;
 extern boost::asio::thread_pool globalThreadPool;
 
-// Kolumny: Global Scan| Hierarchical Single Column | Hierarchical Multi-Column
-// Wiersze: ilość itemów spełniających kryteria: 2, 4, 6, 8, 10
-void runExp7(std::string baseDir, bool initMode) {
-    const int dbSize = 1'000'000;
+void runExp4(std::string baseDir, bool initMode) {
     const std::vector<std::string> columns = {"phone", "mail", "address"};
-    const std::vector<int> targetItems = { 2, 4, 6, 8, 10};
-    
-    std::vector<int> randomIndices;
-    {
-        std::random_device rd;
-        std::mt19937 gen(rd());
-        std::uniform_int_distribution<int> dist(1, dbSize);
-        
-        std::unordered_set<int> uniqueIndices;
-        while (uniqueIndices.size() < 10) {
-            uniqueIndices.insert(dist(gen));
-        }
-        
-        randomIndices.assign(uniqueIndices.begin(), uniqueIndices.end());
-        std::sort(randomIndices.begin(), randomIndices.end());
-        
-        std::string indicesStr;
-        for (int idx : randomIndices) {
-            indicesStr += std::to_string(idx) + ", ";
-        }
-        spdlog::info("Generated 10 random indices: {}", indicesStr);
-    }
+    const std::vector<int> dbSizes = {1'000'000, 4'000'000};
 
     DBManager dbManager;
     BloomManager bloomManager;
 
-    for (const auto& numItems : targetItems) {
-        TestParams params = {baseDir + "/exp7_db_" + std::to_string(numItems), false, dbSize, 3, 1, 100000, 1'000'000, 6};
+    for (const auto& dbSize : dbSizes) {
+        TestParams params = {baseDir + "/exp4_db_" + std::to_string(dbSize), false, dbSize, 3, 1, 100000, 1'000'000, 6};
         spdlog::info("ExpBloomMetrics: Rozpoczynam eksperyment dla bazy '{}'", params.dbName);
-
+        
         clearBloomFilterFiles(params.dbName);
         dbManager.openDB(params.dbName, params.compactionLogging);
 
         if (!initMode) {
-            // Create a subset of random indices based on numItems
-            std::unordered_set<int> targetIndices;
-            for (size_t i = 0; i < numItems && i < randomIndices.size(); i++) {
-                targetIndices.insert(randomIndices[i]);
-            }
-            
-            // Log which indices we're using
-            std::string indicesStr;
-            for (int idx : targetIndices) {
-                indicesStr += std::to_string(idx) + ", ";
-            }
-            spdlog::info("Using {} target indices: {}", targetIndices.size(), indicesStr);
-            
-            // Use the modified DB manager method to insert records with specific target indices
-            dbManager.insertRecordsWithSearchTargets(params.numRecords, columns, targetIndices);
-            
+            dbManager.insertRecords(params.numRecords, columns);
             spdlog::info("ExpBloomMetrics: 10 second sleep...");
             std::this_thread::sleep_for(std::chrono::seconds(10));
         }
@@ -130,7 +90,7 @@ void runExp7(std::string baseDir, bool initMode) {
             fut.wait();
         }
 
-        std::ofstream out(baseDir + "/exp_7_bloom_metrics.csv", std::ios::app);
+        std::ofstream out(baseDir + "/exp_4_bloom_metrics.csv", std::ios::app);
         if (!out) {
             spdlog::error("ExpBloomMetrics: Nie udało się otworzyć pliku wynikowego!");
             return;
@@ -139,14 +99,10 @@ void runExp7(std::string baseDir, bool initMode) {
         // hierarchies vector
         std::vector<BloomTree> queryTrees;
         std::vector<std::string> expectedValues;
-
-        spdlog::info("value in half of the db: {}", columns[0] + "_value" + std::to_string(dbSize / 2));
-
+        std::string expectedValueSuffix = "_value" + std::to_string(dbSize / 2);
         for (const auto& column : columns) {
             queryTrees.push_back(hierarchies.at(column));
-            const std::string expectedValue = column + "_target";
-            spdlog::info("ExpBloomMetrics: expectedValue: {}", expectedValue);
-            expectedValues.push_back(expectedValue);
+            expectedValues.push_back(column + expectedValueSuffix);
         }
 
         // --- Global Scan Query ---
@@ -155,24 +111,37 @@ void runExp7(std::string baseDir, bool initMode) {
         std::vector<std::string> globalMatches = dbManager.scanForRecordsInColumns(columns, expectedValues);
         stopwatch.stop();
         auto globalScanTime = stopwatch.elapsedMicros();
-        
+        size_t bloomChecks = gBloomCheckCount.load();
+        spdlog::info("Global Total bloom‐filter checks this query: {}", bloomChecks);
+        // Reset for the next experiment if you like:
+        gBloomCheckCount = 0;
         // --- Hierarchical Multi-Column Query ---
         stopwatch.start();
         std::vector<std::string> hierarchicalMatches = multiColumnQueryHierarchical(queryTrees, expectedValues, "", "", dbManager);
         stopwatch.stop();
         auto hierarchicalMultiTime = stopwatch.elapsedMicros();
-        
+        bloomChecks = gBloomCheckCount.load();
+        spdlog::info("Multi Total bloom‐filter checks this query: {}", bloomChecks);
+
+        // Reset for the next experiment if you like:
+        gBloomCheckCount = 0;
         // --- Hierarchical Single Column Query ---
         stopwatch.start();
         std::vector<std::string> singlehierarchyMatches = dbManager.findUsingSingleHierarchy(queryTrees[0], columns, expectedValues);
         stopwatch.stop();
         auto hierarchicalSingleTime = stopwatch.elapsedMicros();
-        
+        bloomChecks = gBloomCheckCount.load();
+        spdlog::info("Single Total bloom‐filter checks this query: {}", bloomChecks);
+
+        // Reset for the next experiment if you like:
+        gBloomCheckCount = 0;
         // Zapis wyników do pliku CSV
         out << params.numRecords << ","
-            << numItems << ","
+            << dbSize << ","
             << globalScanTime << ","
             << hierarchicalSingleTime << ","
             << hierarchicalMultiTime << "\n";
+        out.close();
+        dbManager.closeDB();
     }
 } 
