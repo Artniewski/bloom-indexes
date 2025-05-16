@@ -74,12 +74,12 @@ int main(int argc, char* argv[]) {
     }
     try {
         // run section
-        runExp1(baseDir, initMode);
-        runExp2(baseDir, initMode);
-        runExp3(baseDir, initMode);
-        runExp4(baseDir, initMode);
-        runExp5(baseDir, initMode);
-        runExp6(baseDir, initMode);
+        // runExp1(baseDir, initMode);
+        // runExp2(baseDir, initMode);
+        // runExp3(baseDir, initMode);
+        // runExp4(baseDir, initMode);
+        // runExp5(baseDir, initMode);
+        // runExp6(baseDir, initMode);
         runExp7(baseDir, initMode);
         runExp8(baseDir, initMode);
     } catch (const std::exception& e) {

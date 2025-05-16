@@ -23,6 +23,10 @@ extern boost::asio::thread_pool globalThreadPool;
 
 /// Global counter of bloom‐filter lookups performed
 inline std::atomic<size_t> gBloomCheckCount{0};
+/// Global counter of leaf-node bloom-filter lookups performed
+inline std::atomic<size_t> gLeafBloomCheckCount{0};
+/// Global counter of SSTables checked
+inline std::atomic<size_t> gSSTCheckCount{0};
 
 // Combination of nodes
 struct Combo {
@@ -47,6 +51,10 @@ inline std::vector<std::string> finalSstScanAndIntersect(const Combo& combo,
                                                   const std::vector<std::string>& values,
                                                   DBManager& dbManager) {
     size_t n = combo.nodes.size();
+    spdlog::info("SSTables checked eee: {}", n);
+
+    // Increment SSTable check count
+    gSSTCheckCount += n;
 
     std::vector<std::promise<std::unordered_set<std::string>>> promises(n);
     std::vector<std::future<std::unordered_set<std::string>>> futures;
@@ -102,6 +110,11 @@ inline void dfsMultiColumn(const std::vector<std::string>& values, Combo current
     // check if all nodes pass Bloom
     for (size_t i = 0; i < currentCombo.nodes.size(); ++i) {
         ++gBloomCheckCount;
+        // Count leaf bloom checks separately
+        if (currentCombo.nodes[i]->filename != "Memory") {
+            ++gLeafBloomCheckCount;
+        }
+        
         if (!currentCombo.nodes[i]->bloom.exists(values[i])) {
             return;  // Prune this branch.
         }
@@ -136,6 +149,11 @@ inline void dfsMultiColumn(const std::vector<std::string>& values, Combo current
             for (Node* child : currentNode->children) {
                 // Only include the child if it passes the Bloom filter.
                 ++gBloomCheckCount;
+                // Count leaf bloom checks separately
+                if (child->filename != "Memory") {
+                    ++gLeafBloomCheckCount;
+                }
+                
                 if (child->bloom.exists(values[i])) {
                     candidateOptions[i].push_back(child);
                 }
@@ -184,6 +202,12 @@ inline std::vector<std::string> multiColumnQueryHierarchical(std::vector<BloomTr
         sw.stop();
         return {};
     }
+    
+    // Reset counters
+    gBloomCheckCount = 0;
+    gLeafBloomCheckCount = 0;
+    gSSTCheckCount = 0;
+    
     size_t n = trees.size();
     Combo startCombo;
     startCombo.nodes.resize(n);
@@ -202,5 +226,7 @@ inline std::vector<std::string> multiColumnQueryHierarchical(std::vector<BloomTr
     dfsMultiColumn(values, startCombo, dbManager);
     sw.stop();
     spdlog::critical("Multi-column query with SST scan took {} µs, found matching {} keys.", sw.elapsedMicros(), globalfinalMatches.size());
+    spdlog::info("Bloom filters checked: {} (total), {} (leaves only), SSTables checked: {}", 
+                gBloomCheckCount.load(), gLeafBloomCheckCount.load(), gSSTCheckCount.load());
     return globalfinalMatches;
 }

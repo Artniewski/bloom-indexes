@@ -14,6 +14,7 @@
 #include <unordered_set>
 #include <random>
 
+#include "algorithm.hpp"
 #include "compaction_event_listener.hpp"
 #include "stopwatch.hpp"
 
@@ -456,6 +457,11 @@ std::vector<std::string> DBManager::findUsingSingleHierarchy(BloomTree& hierarch
     }
 
     std::vector<std::string> allKeys;
+    
+    // Count SSTable checks
+    extern std::atomic<size_t> gSSTCheckCount;
+    gSSTCheckCount += candidates.size();
+    
     for (const auto& candidate : candidates) {
         auto keys = scanFileForKeysWithValue(candidate->filename, values[0], candidate->startKey, candidate->endKey);
         allKeys.insert(allKeys.end(), keys.begin(), keys.end());
@@ -487,5 +493,7 @@ std::vector<std::string> DBManager::findUsingSingleHierarchy(BloomTree& hierarch
 
     sw.stop();
     spdlog::critical("Single hierarchy check took {} µs, found {} matching keys.", sw.elapsedMicros(), matchingKeys.size());
+    spdlog::info("Bloom filters checked: {} (total), {} (leaves only), SSTables checked: {}", 
+                 gBloomCheckCount.load(), gLeafBloomCheckCount.load(), gSSTCheckCount.load());
     return matchingKeys;
 }

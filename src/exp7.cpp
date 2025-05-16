@@ -68,6 +68,16 @@ void runExp7(std::string baseDir, bool initMode) {
     DBManager dbManager;
     BloomManager bloomManager;
 
+    std::ofstream out(baseDir + "/exp_7_bloom_metrics.csv", std::ios::app);
+    if (!out) {
+        spdlog::error("ExpBloomMetrics: Nie udało się otworzyć pliku wynikowego!");
+        return;
+    }
+    
+    out << "NumRecords,NumItems,GlobalScanTime,HierarchicalSingleTime,HierarchicalMultiTime,"
+        << "MultiBloomChecks,MultiLeafBloomChecks,MultiSSTChecks,"
+        << "SingleBloomChecks,SingleLeafBloomChecks,SingleSSTChecks\n";
+
     for (const auto& numItems : targetItems) {
         TestParams params = {baseDir + "/exp7_db_" + std::to_string(numItems), false, dbSize, 3, 1, 100000, 1'000'000, 6};
         spdlog::info("ExpBloomMetrics: Rozpoczynam eksperyment dla bazy '{}'", params.dbName);
@@ -128,12 +138,6 @@ void runExp7(std::string baseDir, bool initMode) {
             hierarchies.try_emplace(column, std::move(hierarchy));
         }
 
-        std::ofstream out(baseDir + "/exp_7_bloom_metrics.csv", std::ios::app);
-        if (!out) {
-            spdlog::error("ExpBloomMetrics: Nie udało się otworzyć pliku wynikowego!");
-            return;
-        }
-
         // hierarchies vector
         std::vector<BloomTree> queryTrees;
         std::vector<std::string> expectedValues;
@@ -154,11 +158,29 @@ void runExp7(std::string baseDir, bool initMode) {
         stopwatch.stop();
         auto globalScanTime = stopwatch.elapsedMicros();
         
+        // Reset counters before multi-column query
+        gBloomCheckCount = 0;
+        gLeafBloomCheckCount = 0;
+        gSSTCheckCount = 0;
+        
         // --- Hierarchical Multi-Column Query ---
         stopwatch.start();
         std::vector<std::string> hierarchicalMatches = multiColumnQueryHierarchical(queryTrees, expectedValues, "", "", dbManager);
         stopwatch.stop();
         auto hierarchicalMultiTime = stopwatch.elapsedMicros();
+        
+        // Save multi-column query counters
+        size_t multiBloomChecks = gBloomCheckCount.load();
+        size_t multiLeafBloomChecks = gLeafBloomCheckCount.load();
+        size_t multiSSTChecks = gSSTCheckCount.load();
+        
+        spdlog::info("Multi-column Bloom checks: {} (total), {} (leaves only), SSTables checked: {}", 
+                    multiBloomChecks, multiLeafBloomChecks, multiSSTChecks);
+        
+        // Reset counters before single hierarchy query
+        gBloomCheckCount = 0;
+        gLeafBloomCheckCount = 0;
+        gSSTCheckCount = 0;
         
         // --- Hierarchical Single Column Query ---
         stopwatch.start();
@@ -166,11 +188,25 @@ void runExp7(std::string baseDir, bool initMode) {
         stopwatch.stop();
         auto hierarchicalSingleTime = stopwatch.elapsedMicros();
         
-        // Zapis wyników do pliku CSV
+        // Save single hierarchy query counters
+        size_t singleBloomChecks = gBloomCheckCount.load();
+        size_t singleLeafBloomChecks = gLeafBloomCheckCount.load();
+        size_t singleSSTChecks = gSSTCheckCount.load();
+        
+        spdlog::info("Single Hierarchy Bloom checks: {} (total), {} (leaves only), SSTables checked: {}", 
+                    singleBloomChecks, singleLeafBloomChecks, singleSSTChecks);
+        
+        // Zapis wyników do pliku CSV with both sets of counters
         out << params.numRecords << ","
             << numItems << ","
             << globalScanTime << ","
             << hierarchicalSingleTime << ","
-            << hierarchicalMultiTime << "\n";
+            << hierarchicalMultiTime << ","
+            << multiBloomChecks << ","
+            << multiLeafBloomChecks << ","
+            << multiSSTChecks << ","
+            << singleBloomChecks << ","
+            << singleLeafBloomChecks << ","
+            << singleSSTChecks << "\n";
     }
 } 

@@ -11,6 +11,7 @@
 #include <stdexcept>
 
 extern std::atomic<size_t> gBloomCheckCount;  // declared in algorithm.hpp
+extern std::atomic<size_t> gLeafBloomCheckCount;  // declared in algorithm.hpp
 
 void BloomTree::addLeafNode(BloomFilter&& bv, const std::string& file,
                             const std::string& start, const std::string& end) {
@@ -66,6 +67,12 @@ void BloomTree::search(Node* node, const std::string& value,
 
     if (overlaps) {
         ++gBloomCheckCount;
+        
+        // Track leaf bloom filter checks
+        if (node->filename != "Memory") {
+            ++gLeafBloomCheckCount;
+        }
+        
         if (node->bloom.exists(value)) {
             if (node->filename != "Memory") {
                 results.push_back(node->filename);
@@ -98,6 +105,12 @@ void BloomTree::searchNodes(Node* node, const std::string& value,
 
     if (overlaps) {
         ++gBloomCheckCount;
+        
+        // Track leaf bloom filter checks
+        if (node->filename != "Memory") {
+            ++gLeafBloomCheckCount;
+        }
+        
         if (node->bloom.exists(value)) {
             if (node->children.empty()) {
                 results.push_back(node);
