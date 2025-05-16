@@ -58,36 +58,34 @@ void runExp4(std::string baseDir, bool initMode) {
 
         std::map<std::string, BloomTree> hierarchies;
         std::mutex hierarchiesMutex;
-        std::vector<std::future<void>> futures;
-        std::atomic<int> tasksRemaining(columns.size());
-
+        
+        // First asynchronously get all SST files for all columns
+        std::map<std::string, std::vector<std::string>> columnSstFiles;
+        std::vector<std::future<std::pair<std::string, std::vector<std::string>>>> scanFutures;
+        
         for (const auto& column : columns) {
-            std::promise<void> taskPromise;
-            futures.push_back(taskPromise.get_future());
+            std::promise<std::pair<std::string, std::vector<std::string>>> scanPromise;
+            scanFutures.push_back(scanPromise.get_future());
             
-            boost::asio::post(globalThreadPool, [&dbManager, &bloomManager, &params, column, &hierarchies, &hierarchiesMutex, promise = std::move(taskPromise), &tasksRemaining]() mutable {
+            boost::asio::post(globalThreadPool, [column, &dbManager, &params, promise = std::move(scanPromise)]() mutable {
                 auto sstFiles = dbManager.scanSSTFilesForColumn(params.dbName, column);
-                BloomTree hierarchy = bloomManager.createPartitionedHierarchy(
-                    sstFiles, params.itemsPerPartition, params.bloomSize, params.numHashFunctions, params.bloomTreeRatio);
-                spdlog::info("Hierarchy built for column: {}", column);
-                
-                // Safely store result in the map
-                {
-                    std::lock_guard<std::mutex> lock(hierarchiesMutex);
-                    hierarchies.try_emplace(column, std::move(hierarchy));
-                }
-                
-                promise.set_value();
-                
-                if (--tasksRemaining == 0) {
-                    // All tasks completed
-                }
+                promise.set_value(std::make_pair(column, std::move(sstFiles)));
             });
         }
-
-        // Wait for all tasks to complete
-        for (auto& fut : futures) {
-            fut.wait();
+        
+        // Wait for all scanning to complete
+        for (auto& fut : scanFutures) {
+            auto [column, sstFiles] = fut.get();
+            columnSstFiles[column] = std::move(sstFiles);
+        }
+        
+        // Now process each column's hierarchy building sequentially
+        // (createPartitionedHierarchy already has internal parallelism)
+        for (const auto& [column, sstFiles] : columnSstFiles) {
+            BloomTree hierarchy = bloomManager.createPartitionedHierarchy(
+                sstFiles, params.itemsPerPartition, params.bloomSize, params.numHashFunctions, params.bloomTreeRatio);
+            spdlog::info("Hierarchy built for column: {}", column);
+            hierarchies.try_emplace(column, std::move(hierarchy));
         }
 
         std::ofstream out(baseDir + "/exp_4_bloom_metrics.csv", std::ios::app);
