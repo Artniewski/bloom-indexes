@@ -15,7 +15,6 @@
 #include <random>
 
 #include "algorithm.hpp"
-#include "compaction_event_listener.hpp"
 #include "stopwatch.hpp"
 
 void DBManager::compactAllColumnFamilies() {
@@ -34,7 +33,7 @@ void DBManager::compactAllColumnFamilies() {
     assert(s.ok());
 }
 
-void DBManager::openDB(const std::string& dbname, bool withListener, std::vector<std::string> columns) {
+void DBManager::openDB(const std::string& dbname, std::vector<std::string> columns) {
     StopWatch sw;
     sw.start();
 
@@ -46,9 +45,6 @@ void DBManager::openDB(const std::string& dbname, bool withListener, std::vector
     rocksdb::DBOptions dbOptions;
     dbOptions.create_if_missing = true;
     dbOptions.create_missing_column_families = true;
-    if (withListener) {
-        dbOptions.listeners.emplace_back(std::make_shared<CompactionEventListener>());
-    }
 
     std::vector<std::string> cf_names = columns;
     cf_names.push_back("default");

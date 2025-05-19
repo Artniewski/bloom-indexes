@@ -25,7 +25,6 @@
 // Import necessary declarations from main.cpp
 struct TestParams {
     std::string dbName;
-    bool compactionLogging;
     int numRecords;
     int bloomTreeRatio;
     int numberOfAttempts;
@@ -79,11 +78,12 @@ void runExp7(std::string baseDir, bool initMode) {
         << "SingleBloomChecks,SingleLeafBloomChecks,SingleSSTChecks\n";
 
     for (const auto& numItems : targetItems) {
-        TestParams params = {baseDir + "/exp7_db_" + std::to_string(numItems), false, dbSize, 3, 1, 100000, 1'000'000, 6};
+        TestParams params = {baseDir + "/exp7_db_" + std::to_string(numItems), dbSize, 3, 1, 100000, 1'000'000, 6};
         spdlog::info("ExpBloomMetrics: Rozpoczynam eksperyment dla bazy '{}'", params.dbName);
 
         clearBloomFilterFiles(params.dbName);
-        dbManager.openDB(params.dbName, params.compactionLogging);
+        spdlog::info("Exp7: Starting experiment for DB '{}'", params.dbName);
+        dbManager.openDB(params.dbName);
 
         if (!initMode) {
             // Create a subset of random indices based on numItems

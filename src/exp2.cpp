@@ -22,7 +22,6 @@
 
 struct TestParams {
     std::string dbName;
-    bool compactionLogging;
     int numRecords;
     int bloomTreeRatio;
     int numberOfAttempts;
@@ -43,11 +42,11 @@ void runExp2(std::string baseDir, bool initMode) {
     BloomManager bloomManager;
 
     for (const auto& items : itemsPerPartition) {
-        TestParams params = {baseDir + "/exp2_db_" + std::to_string(items), false, dbSize, 3, 1, items, 1000000, 6};
+        TestParams params = {baseDir + "/exp2_db_" + std::to_string(items), dbSize, 3, 1, items, 1000000, 6};
         spdlog::info("ExpBloomMetrics: Rozpoczynam eksperyment dla bazy '{}'", params.dbName);
 
         clearBloomFilterFiles(params.dbName);
-        dbManager.openDB(params.dbName, params.compactionLogging);
+        dbManager.openDB(params.dbName);
 
         if (!initMode) {
             dbManager.insertRecords(params.numRecords, columns);
