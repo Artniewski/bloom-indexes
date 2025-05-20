@@ -1,5 +1,9 @@
+#include "exp2.hpp"
+
 #include <spdlog/spdlog.h>
 
+#include <boost/asio/post.hpp>
+#include <boost/asio/thread_pool.hpp>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -9,105 +13,83 @@
 #include <string>
 #include <thread>
 #include <vector>
-#include <mutex>
-#include <boost/asio/thread_pool.hpp>
-#include <boost/asio/post.hpp>
 
+#include "algorithm.hpp"
 #include "bloomTree.hpp"
 #include "bloom_manager.hpp"
 #include "db_manager.hpp"
-#include "algorithm.hpp"
-
-
-
-struct TestParams {
-    std::string dbName;
-    int numRecords;
-    int bloomTreeRatio;
-    int numberOfAttempts;
-    size_t itemsPerPartition;
-    size_t bloomSize;
-    int numHashFunctions;
-};
+#include "exp_utils.hpp"
 
 extern void clearBloomFilterFiles(const std::string& dbDir);
 extern boost::asio::thread_pool globalThreadPool;
 
-void runExp2(std::string baseDir, bool initMode) {
-    const std::vector<std::string> columns = {"phone", "mail", "address"};
-    int dbSize = 1'000'000;
-    const std::vector<size_t> itemsPerPartition = {50000};
+TestParams buildParams(const std::string& dbName, size_t items, size_t dbSize) {
+  return TestParams{
+      dbName,
+      static_cast<int>(dbSize),
+      3,          // bloomTreeRatio
+      1,          // numberOfAttempts
+      items,      // itemsPerPartition
+      1'000'000,  // bloomSize
+      6           // numHashFunctions
+  };
+}
 
-    DBManager dbManager;
-    BloomManager bloomManager;
+void runExp2(const std::string& dbPath, size_t dbSize) {
+  const std::vector<std::string> columns = {"phone", "mail", "address"};
+  const std::vector<size_t> itemsPerPartition = {50000, 100000, 200000, 500000,
+                                                 1000000};
 
-    for (const auto& items : itemsPerPartition) {
-        TestParams params = {baseDir + "/exp2_db_" + std::to_string(items), dbSize, 3, 1, items, 1000000, 6};
-        spdlog::info("ExpBloomMetrics: Rozpoczynam eksperyment dla bazy '{}'", params.dbName);
+  writeCSVheaders();
 
-        clearBloomFilterFiles(params.dbName);
-        dbManager.openDB(params.dbName);
+  DBManager dbManager;
+  BloomManager bloomManager;
 
-        if (!initMode) {
-            dbManager.insertRecords(params.numRecords, columns);
-            spdlog::info("ExpBloomMetrics: 10 second sleep...");
-            std::this_thread::sleep_for(std::chrono::seconds(10));
-        }
+  spdlog::info("Exp2: Opening database '{}' for experiment.", dbPath);
+  dbManager.openDB(dbPath);
 
-        std::map<std::string, BloomTree> hierarchies;
-        std::mutex hierarchiesMutex;
-        
-        // First asynchronously get all SST files for all columns
-        std::map<std::string, std::vector<std::string>> columnSstFiles;
-        std::vector<std::future<std::pair<std::string, std::vector<std::string>>>> scanFutures;
-        
-        for (const auto& column : columns) {
-            std::promise<std::pair<std::string, std::vector<std::string>>> scanPromise;
-            scanFutures.push_back(scanPromise.get_future());
-            
-            boost::asio::post(globalThreadPool, [column, &dbManager, &params, promise = std::move(scanPromise)]() mutable {
-                auto sstFiles = dbManager.scanSSTFilesForColumn(params.dbName, column);
-                promise.set_value(std::make_pair(column, std::move(sstFiles)));
-            });
-        }
-        
-        // Wait for all scanning to complete
-        for (auto& fut : scanFutures) {
-            auto [column, sstFiles] = fut.get();
-            columnSstFiles[column] = std::move(sstFiles);
-        }
-        
-        // Now process each column's hierarchy building sequentially
-        // (createPartitionedHierarchy already has internal parallelism)
-        for (const auto& [column, sstFiles] : columnSstFiles) {
-            BloomTree hierarchy = bloomManager.createPartitionedHierarchy(
-                sstFiles, params.itemsPerPartition, params.bloomSize, params.numHashFunctions, params.bloomTreeRatio);
-            spdlog::info("Hierarchy built for column: {}", column);
-            hierarchies.try_emplace(column, std::move(hierarchy));
-        }
+  for (const auto& items : itemsPerPartition) {
+    TestParams params = buildParams(dbPath, items, dbSize);
+    spdlog::info(
+        "Exp2: Running iteration with items_per_partition={} on database '{}'",
+        items, params.dbName);
+    clearBloomFilterFiles(params.dbName);
 
-        size_t totalDiskBloomSize = 0;
-        size_t totalMemoryBloomSize = 0;
-        for (const auto& kv : hierarchies) {
-            const BloomTree& tree = kv.second;
-            totalDiskBloomSize += tree.diskSize();
-            totalMemoryBloomSize += tree.memorySize();
-        }
+    std::map<std::string, BloomTree> hierarchies;
 
-        // Zapis wyników do pliku CSV
-        std::ofstream out(baseDir + "/exp_2_bloom_metrics.csv", std::ios::app);
-        if (!out) {
-            spdlog::error("ExpBloomMetrics: Nie udało się otworzyć pliku wynikowego!");
-            return;
-        }
+    std::map<std::string, std::vector<std::string>> columnSstFiles =
+        scanSstFilesAsync(columns, dbManager, params);
 
-        // Format CSV: numRecords,itemsPerPartition, dbSize, diskBloomSize, memoryBloomSize
-        out << params.numRecords << ","
-            << items << ","
-            << dbSize << ","
-            << totalDiskBloomSize << ","
-            << totalMemoryBloomSize << "\n";
-        out.close();
-        dbManager.closeDB();
+    hierarchies = buildHierarchies(columnSstFiles, bloomManager, params);
+
+    size_t totalDiskBloomSize = 0;
+    size_t totalMemoryBloomSize = 0;
+    for (const auto& kv : hierarchies) {
+      const BloomTree& tree = kv.second;
+      totalDiskBloomSize += tree.diskSize();
+      totalMemoryBloomSize += tree.memorySize();
     }
-} 
+
+    // Zapis wyników do pliku CSV
+    std::ofstream out("csv/exp_2_bloom_metrics.csv", std::ios::app);
+    if (!out) {
+      spdlog::error(
+          "ExpBloomMetrics: Nie udało się otworzyć pliku wynikowego!");
+      return;
+    }
+    out << dbSize << "," << items << ","
+        << hierarchies.at(columns[0]).leafNodes.size() << ","
+        << getProbabilityOfFalsePositive(params.bloomSize,
+                                         params.numHashFunctions,
+                                         params.itemsPerPartition)
+        << "," << totalDiskBloomSize << "," << totalMemoryBloomSize << "\n";
+    out.close();
+  }
+  spdlog::info("ExpBloomMetrics: Closing database '{}'.", dbPath);
+  dbManager.closeDB();  // Close DB once after all iterations
+}
+
+void writeCSVheaders() {
+  writeCsvHeader("csv/exp_2_bloom_metrics.csv", 
+                 "dbSize,itemsPerPartition,leafs,falsePositive,diskBloomSize,memoryBloomSize");
+}

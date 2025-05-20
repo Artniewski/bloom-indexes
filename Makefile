@@ -17,6 +17,7 @@ SRC = \
     src/exp6.cpp \
     src/exp7.cpp \
     src/exp8.cpp \
+    src/exp_utils.cpp \
     bloom/bloomTree.cpp \
     bloom/bloom_value.cpp \
     bloom/node.cpp \

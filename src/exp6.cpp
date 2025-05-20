@@ -1,5 +1,7 @@
 #include <spdlog/spdlog.h>
 
+#include <boost/asio/post.hpp>
+#include <boost/asio/thread_pool.hpp>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -9,122 +11,90 @@
 #include <string>
 #include <thread>
 #include <vector>
-#include <mutex>
-#include <boost/asio/thread_pool.hpp>
-#include <boost/asio/post.hpp>
 
+#include "algorithm.hpp"
 #include "bloomTree.hpp"
 #include "bloom_manager.hpp"
 #include "db_manager.hpp"
+#include "exp_utils.hpp"
 #include "stopwatch.hpp"
-#include "algorithm.hpp"
-
-
-
-struct TestParams {
-    std::string dbName;
-    int numRecords;
-    int bloomTreeRatio;
-    int numberOfAttempts;
-    size_t itemsPerPartition;
-    size_t bloomSize;
-    int numHashFunctions;
-};
+#include "test_params.hpp"
 
 extern void clearBloomFilterFiles(const std::string& dbDir);
 extern boost::asio::thread_pool globalThreadPool;
 
-void runExp6(std::string baseDir, bool initMode) {
-    const std::vector<std::string> columns = {"phone", "mail", "address"};
-    const int dbSize = 4'000'000;
-    const std::vector<size_t> bloomSizes = {500000, 1000000, 2000000};
+void writeExp6CSVHeaders() {
+  writeCsvHeader("csv/exp_6_bloom_metrics.csv",
+                 "numRecords,bloomSize,"
+                 "globalScanTime_avg,globalScanTime_min,globalScanTime_max,globalScanTime_median,"
+                 "hierarchicalSingleTime_avg,hierarchicalSingleTime_min,hierarchicalSingleTime_max,hierarchicalSingleTime_median,"
+                 "hierarchicalMultiTime_avg,hierarchicalMultiTime_min,hierarchicalMultiTime_max,hierarchicalMultiTime_median,"
+                 "falsePositiveProbability,"
+                 "multiCol_bloomChecks_avg,multiCol_bloomChecks_min,multiCol_bloomChecks_max,multiCol_bloomChecks_median,"
+                 "multiCol_leafBloomChecks_avg,multiCol_leafBloomChecks_min,multiCol_leafBloomChecks_max,multiCol_leafBloomChecks_median,"
+                 "multiCol_sstChecks_avg,multiCol_sstChecks_min,multiCol_sstChecks_max,multiCol_sstChecks_median,"
+                 "singleCol_bloomChecks_avg,singleCol_bloomChecks_min,singleCol_bloomChecks_max,singleCol_bloomChecks_median,"
+                 "singleCol_leafBloomChecks_avg,singleCol_leafBloomChecks_min,singleCol_leafBloomChecks_max,singleCol_leafBloomChecks_median,"
+                 "singleCol_sstChecks_avg,singleCol_sstChecks_min,singleCol_sstChecks_max,singleCol_sstChecks_median"
+                 );
+}
 
-    DBManager dbManager;
-    BloomManager bloomManager;
+void runExp6(const std::string& dbPath, size_t dbSize) {
+  const std::vector<std::string> columns = {"phone", "mail", "address"};
+  const std::vector<size_t> bloomSizes = {100000, 500000, 1000000, 2000000,
+                                          3000000};
+  const int numQueryRuns = 10; // Number of times to run queries for statistics
 
-    for (const auto& bloomSize : bloomSizes) {
-        TestParams params = {baseDir + "/exp6_db_" + std::to_string(bloomSize), dbSize, 3, 1, 100000, bloomSize, 6};
-        spdlog::info("ExpBloomMetrics: Rozpoczynam eksperyment dla bazy '{}'", params.dbName);
+  DBManager dbManager;
+  BloomManager bloomManager;
 
-        clearBloomFilterFiles(params.dbName);
-        dbManager.openDB(params.dbName);
+  writeExp6CSVHeaders();
 
-        if (!initMode) {
-            dbManager.insertRecords(params.numRecords, columns);
-            spdlog::info("ExpBloomMetrics: 10 second sleep...");
-            std::this_thread::sleep_for(std::chrono::seconds(10));
-        }
+  for (const auto& bloomSize : bloomSizes) {
+    TestParams params = {
+        dbPath, static_cast<int>(dbSize), 3, 1, 100000, bloomSize, 6};
+    spdlog::info(
+        "Exp6: Rozpoczynam eksperyment dla bazy '{}', rozmiar bloom: {} bits",
+        params.dbName, bloomSize);
 
-        std::map<std::string, BloomTree> hierarchies;
-        std::mutex hierarchiesMutex;
-        
-        // First asynchronously get all SST files for all columns
-        std::map<std::string, std::vector<std::string>> columnSstFiles;
-        std::vector<std::future<std::pair<std::string, std::vector<std::string>>>> scanFutures;
-        
-        for (const auto& column : columns) {
-            std::promise<std::pair<std::string, std::vector<std::string>>> scanPromise;
-            scanFutures.push_back(scanPromise.get_future());
-            
-            boost::asio::post(globalThreadPool, [column, &dbManager, &params, promise = std::move(scanPromise)]() mutable {
-                auto sstFiles = dbManager.scanSSTFilesForColumn(params.dbName, column);
-                promise.set_value(std::make_pair(column, std::move(sstFiles)));
-            });
-        }
-        
-        // Wait for all scanning to complete
-        for (auto& fut : scanFutures) {
-            auto [column, sstFiles] = fut.get();
-            columnSstFiles[column] = std::move(sstFiles);
-        }
-        
-        // Now process each column's hierarchy building sequentially
-        // (createPartitionedHierarchy already has internal parallelism)
-        for (const auto& [column, sstFiles] : columnSstFiles) {
-            BloomTree hierarchy = bloomManager.createPartitionedHierarchy(
-                sstFiles, params.itemsPerPartition, params.bloomSize, params.numHashFunctions, params.bloomTreeRatio);
-            spdlog::info("Hierarchy built for column: {}", column);
-            hierarchies.try_emplace(column, std::move(hierarchy));
-        }
+    clearBloomFilterFiles(params.dbName);
+    dbManager.openDB(params.dbName);
 
-        std::ofstream out(baseDir + "/exp_6_bloom_metrics.csv", std::ios::app);
-        if (!out) {
-            spdlog::error("ExpBloomMetrics: Nie udało się otworzyć pliku wynikowego!");
-            return;
-        }
+    std::map<std::string, BloomTree> hierarchies;
 
-        // hierarchies vector
-        std::vector<BloomTree> queryTrees;
-        std::vector<std::string> expectedValues;
-        std::string expectedValueSuffix = "_value" + std::to_string(dbSize / 2);
-        for (const auto& column : columns) {
-            queryTrees.push_back(hierarchies.at(column));
-            expectedValues.push_back(column + expectedValueSuffix);
-        }
+    std::map<std::string, std::vector<std::string>> columnSstFiles =
+        scanSstFilesAsync(columns, dbManager, params);
 
-        // --- Global Scan Query ---
-        StopWatch stopwatch;
-        stopwatch.start();
-        std::vector<std::string> globalMatches = dbManager.scanForRecordsInColumns(columns, expectedValues);
-        stopwatch.stop();
-        auto globalScanTime = stopwatch.elapsedMicros();
-        // --- Hierarchical Multi-Column Query ---
-        stopwatch.start();
-        std::vector<std::string> hierarchicalMatches = multiColumnQueryHierarchical(queryTrees, expectedValues, "", "", dbManager);
-        stopwatch.stop();
-        auto hierarchicalMultiTime = stopwatch.elapsedMicros();
-        // --- Hierarchical Single Column Query ---
-        stopwatch.start();
-        std::vector<std::string> singlehierarchyMatches = dbManager.findUsingSingleHierarchy(queryTrees[0], columns, expectedValues);
-        stopwatch.stop();
-        auto hierarchicalSingleTime = stopwatch.elapsedMicros();
-        // Zapis wyników do pliku CSV
-        out << params.numRecords << ","
-            << bloomSize << ","
-            << globalScanTime << ","
-            << hierarchicalSingleTime << ","
-            << hierarchicalMultiTime << "\n";
-        out.close();
-        dbManager.closeDB();
+    hierarchies = buildHierarchies(columnSstFiles, bloomManager, params);
+
+    AggregatedQueryTimings timings =
+        runStandardQueries(dbManager, hierarchies, columns, dbSize, numQueryRuns);
+
+    double falsePositiveProb = getProbabilityOfFalsePositive(
+        params.bloomSize, params.numHashFunctions, params.itemsPerPartition);
+
+    // Zapis wyników do pliku CSV
+    std::ofstream out("csv/exp_6_bloom_metrics.csv", std::ios::app);
+    if (!out) {
+      spdlog::error(
+          "Exp6: Nie udało się otworzyć pliku wynikowego "
+          "csv/exp_6_bloom_metrics.csv do dopisywania!");
+      return;  // Or exit
     }
-} 
+
+    out << dbSize << "," << bloomSize << ","
+        << timings.globalScanTimeStats.average << "," << timings.globalScanTimeStats.min << "," << timings.globalScanTimeStats.max << "," << timings.globalScanTimeStats.median << ","
+        << timings.hierarchicalSingleTimeStats.average << "," << timings.hierarchicalSingleTimeStats.min << "," << timings.hierarchicalSingleTimeStats.max << "," << timings.hierarchicalSingleTimeStats.median << ","
+        << timings.hierarchicalMultiTimeStats.average << "," << timings.hierarchicalMultiTimeStats.min << "," << timings.hierarchicalMultiTimeStats.max << "," << timings.hierarchicalMultiTimeStats.median << ","
+        << falsePositiveProb << ","
+        << timings.multiCol_bloomChecksStats.average << "," << timings.multiCol_bloomChecksStats.min << "," << timings.multiCol_bloomChecksStats.max << "," << timings.multiCol_bloomChecksStats.median << ","
+        << timings.multiCol_leafBloomChecksStats.average << "," << timings.multiCol_leafBloomChecksStats.min << "," << timings.multiCol_leafBloomChecksStats.max << "," << timings.multiCol_leafBloomChecksStats.median << ","
+        << timings.multiCol_sstChecksStats.average << "," << timings.multiCol_sstChecksStats.min << "," << timings.multiCol_sstChecksStats.max << "," << timings.multiCol_sstChecksStats.median << ","
+        << timings.singleCol_bloomChecksStats.average << "," << timings.singleCol_bloomChecksStats.min << "," << timings.singleCol_bloomChecksStats.max << "," << timings.singleCol_bloomChecksStats.median << ","
+        << timings.singleCol_leafBloomChecksStats.average << "," << timings.singleCol_leafBloomChecksStats.min << "," << timings.singleCol_leafBloomChecksStats.max << "," << timings.singleCol_leafBloomChecksStats.median << ","
+        << timings.singleCol_sstChecksStats.average << "," << timings.singleCol_sstChecksStats.min << "," << timings.singleCol_sstChecksStats.max << "," << timings.singleCol_sstChecksStats.median
+        << "\n";
+    out.close();
+    dbManager.closeDB();
+  }
+}

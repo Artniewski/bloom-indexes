@@ -36,6 +36,25 @@ struct TestParams {
 extern void clearBloomFilterFiles(const std::string& dbDir);
 extern boost::asio::thread_pool globalThreadPool;
 
+std::map<int, std::unordered_set<int>> buildTargetMap(int numRecords, const std::vector<int>& keys) {
+    std::map<int, std::unordered_set<int>> result;
+    std::unordered_set<int> allValues; 
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_int_distribution<int> dist(1, numRecords);
+    for (int key : keys) {
+        std::unordered_set<int> currentSet = result.empty() ? std::unordered_set<int>{} : result.rbegin()->second;
+        while (currentSet.size() < key) {
+            int value = dist(gen);
+            if (allValues.insert(value).second) {
+                currentSet.insert(value);
+            }
+        }
+        result[key] = currentSet;
+    }
+    return result;
+}
+
 // Kolumny: Global Scan| Hierarchical Single Column | Hierarchical Multi-Column
 // Wiersze: ilość itemów spełniających kryteria: 2, 4, 6, 8, 10
 void runExp7(std::string baseDir, bool initMode) {
