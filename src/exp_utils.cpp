@@ -60,87 +60,6 @@ std::map<std::string, BloomTree> buildHierarchies(
   return hierarchies;
 }
 
-QueryTimings runStandardQueries(
-    DBManager& dbManager, const std::map<std::string, BloomTree>& hierarchies,
-    const std::vector<std::string>& columns, size_t dbSizeForExpectedValues) {
-  QueryTimings timings;
-  StopWatch stopwatch;
-
-  std::vector<BloomTree> queryTrees;
-  std::vector<std::string> expectedValues;
-  std::string expectedValueSuffix =
-      "_value" + std::to_string(dbSizeForExpectedValues / 2);
-
-  if (hierarchies.empty() || columns.empty()) {
-    spdlog::warn(
-        "runStandardQueries: Hierarchies map or columns vector is empty, "
-        "skipping query execution.");
-    return timings;  // Return zeroed timings
-  }
-
-  for (const auto& column : columns) {
-    auto it = hierarchies.find(column);
-    if (it == hierarchies.end()) {
-      spdlog::error(
-          "runStandardQueries: Hierarchy for column '{}' not found. Skipping "
-          "query execution.",
-          column);
-      return QueryTimings{};  // Return zeroed timings, or handle error
-                              // differently
-    }
-    queryTrees.push_back(it->second);
-    expectedValues.push_back(column + expectedValueSuffix);
-  }
-
-  // Ensure queryTrees is not empty before accessing queryTrees[0]
-  if (queryTrees.empty()) {
-    spdlog::error(
-        "runStandardQueries: No query trees were prepared, possibly due to "
-        "missing hierarchies. Skipping query execution.");
-    return timings;  // Return zeroed timings
-  }
-
-  // --- Global Scan Query ---
-  stopwatch.start();
-  [[maybe_unused]] std::vector<std::string> globalMatches =
-      dbManager.scanForRecordsInColumns(columns, expectedValues);
-  stopwatch.stop();
-  timings.globalScanTime = stopwatch.elapsedMicros();
-
-  // --- Hierarchical Multi-Column Query ---
-  gBloomCheckCount = 0;
-  gLeafBloomCheckCount = 0;
-  gSSTCheckCount = 0;
-  stopwatch.start();
-  [[maybe_unused]] std::vector<std::string> hierarchicalMatches =
-      multiColumnQueryHierarchical(queryTrees, expectedValues, "", "",
-                                   dbManager);
-  stopwatch.stop();
-  timings.hierarchicalMultiTime = stopwatch.elapsedMicros();
-  timings.multiCol_bloomChecks = gBloomCheckCount.load();
-  timings.multiCol_leafBloomChecks = gLeafBloomCheckCount.load();
-  timings.multiCol_sstChecks = gSSTCheckCount.load();
-
-  // --- Hierarchical Single Column Query ---
-  gBloomCheckCount = 0;
-  gLeafBloomCheckCount = 0;
-  gSSTCheckCount = 0;
-  stopwatch.start();
-  // Assuming findUsingSingleHierarchy is safe to call even if queryTrees[0] or
-  // columns might be problematic based on prior checks, or that it handles such
-  // cases internally.
-  [[maybe_unused]] std::vector<std::string> singlehierarchyMatches =
-      dbManager.findUsingSingleHierarchy(queryTrees[0], columns,
-                                         expectedValues);
-  stopwatch.stop();
-  timings.hierarchicalSingleTime = stopwatch.elapsedMicros();
-  timings.singleCol_bloomChecks = gBloomCheckCount.load();
-  timings.singleCol_leafBloomChecks = gLeafBloomCheckCount.load();
-  timings.singleCol_sstChecks = gSSTCheckCount.load();
-
-  return timings;
-}
-
 void writeCsvHeader(const std::string& filename,
                     const std::string& headerLine) {
   std::ofstream out(filename, std::ios::app);  // Overwrite mode
@@ -234,7 +153,8 @@ CountStatistics calculateCountStatistics(const std::vector<T>& values) {
 
 AggregatedQueryTimings runStandardQueries(
     DBManager& dbManager, const std::map<std::string, BloomTree>& hierarchies,
-    const std::vector<std::string>& columns, size_t dbSize, int numRuns) {
+    const std::vector<std::string>& columns, size_t dbSize, int numRuns,
+    bool skipDbScan) {
   AggregatedQueryTimings aggregated_timings;
   if (numRuns <= 0) {
     spdlog::warn(
@@ -243,9 +163,8 @@ AggregatedQueryTimings runStandardQueries(
     return aggregated_timings;
   }
 
-  std::vector<long long> globalScanTimes;
-  std::vector<long long> hierarchicalMultiTimes;
-  std::vector<long long> hierarchicalSingleTimes;
+  std::vector<long long> globalScanTimes, hierarchicalMultiTimes,
+      hierarchicalSingleTimes;
   std::vector<size_t> multiCol_bloomChecks_vec;
   std::vector<size_t> multiCol_leafBloomChecks_vec;
   std::vector<size_t> multiCol_sstChecks_vec;
@@ -305,7 +224,6 @@ AggregatedQueryTimings runStandardQueries(
     currentExpectedValues.clear();
     currentExpectedValues.reserve(columns.size());
 
-    // Generate a new expected value ID for this run
     size_t currentId = distribution(generator);
     std::string currentExpectedValueSuffix =
         "_value" + std::to_string(currentId);
@@ -318,13 +236,14 @@ AggregatedQueryTimings runStandardQueries(
     }
 
     // --- Global Scan Query ---
-    // global scan only once
-    if (i == 0) {
+    if (!skipDbScan && i == 0) {
       stopwatch.start();
       [[maybe_unused]] std::vector<std::string> globalMatches =
           dbManager.scanForRecordsInColumns(columns, currentExpectedValues);
       stopwatch.stop();
       globalScanTime = stopwatch.elapsedMicros();
+    } else {
+      globalScanTime = 0;
     }
     globalScanTimes.push_back(globalScanTime);
 
@@ -385,3 +304,123 @@ AggregatedQueryTimings runStandardQueries(
 
   return aggregated_timings;
 }
+
+AggregatedQueryTimings runStandardQueriesWithTarget(
+    DBManager& dbManager, const std::map<std::string, BloomTree>& hierarchies,
+    const std::vector<std::string>& columns, size_t dbSize, int numRuns,
+    bool skipDbScan, std::vector<std::string> currentExpectedValues) {
+        AggregatedQueryTimings aggregated_timings;
+
+  std::vector<long long> globalScanTimes, hierarchicalMultiTimes,
+      hierarchicalSingleTimes;
+  std::vector<size_t> multiCol_bloomChecks_vec;
+  std::vector<size_t> multiCol_leafBloomChecks_vec;
+  std::vector<size_t> multiCol_sstChecks_vec;
+  std::vector<size_t> singleCol_bloomChecks_vec;
+  std::vector<size_t> singleCol_leafBloomChecks_vec;
+  std::vector<size_t> singleCol_sstChecks_vec;
+
+  // Reserve space in vectors
+  globalScanTimes.reserve(numRuns);
+  hierarchicalMultiTimes.reserve(numRuns);
+  hierarchicalSingleTimes.reserve(numRuns);
+  multiCol_bloomChecks_vec.reserve(numRuns);
+  multiCol_leafBloomChecks_vec.reserve(numRuns);
+  multiCol_sstChecks_vec.reserve(numRuns);
+  singleCol_bloomChecks_vec.reserve(numRuns);
+  singleCol_leafBloomChecks_vec.reserve(numRuns);
+  singleCol_sstChecks_vec.reserve(numRuns);
+
+  std::vector<BloomTree> queryTrees;
+  queryTrees.reserve(columns.size());
+  for (const auto& column : columns) {
+    auto it = hierarchies.find(column);
+    if (it == hierarchies.end()) {
+      spdlog::error(
+          "runStandardQueries: Hierarchy for column '{}' not found. Skipping "
+          "query execution.",
+          column);
+      return AggregatedQueryTimings{};
+    }
+    queryTrees.push_back(it->second);
+  }
+
+  if (queryTrees.empty()) {
+    spdlog::error(
+        "runStandardQueries: No query trees were prepared, possibly due to "
+        "missing hierarchies. Skipping query execution.");
+    return aggregated_timings;
+  }
+
+  StopWatch stopwatch;
+  long long globalScanTime = 0;
+  for (int i = 0; i < numRuns; ++i) {
+    // --- Global Scan Query ---
+    if (!skipDbScan && i == 0) {
+      stopwatch.start();
+      [[maybe_unused]] std::vector<std::string> globalMatches =
+          dbManager.scanForRecordsInColumns(columns, currentExpectedValues);
+      stopwatch.stop();
+      globalScanTime = stopwatch.elapsedMicros();
+    } else {
+      globalScanTime = 0;
+    }
+    globalScanTimes.push_back(globalScanTime);
+
+    // --- Hierarchical Multi-Column Query ---
+    gBloomCheckCount = 0;
+    gLeafBloomCheckCount = 0;
+    gSSTCheckCount = 0;
+    stopwatch.start();
+    [[maybe_unused]] std::vector<std::string> hierarchicalMatches =
+        multiColumnQueryHierarchical(queryTrees, currentExpectedValues, "", "",
+                                     dbManager);
+    stopwatch.stop();
+    hierarchicalMultiTimes.push_back(stopwatch.elapsedMicros());
+    multiCol_bloomChecks_vec.push_back(gBloomCheckCount.load());
+    multiCol_leafBloomChecks_vec.push_back(gLeafBloomCheckCount.load());
+    multiCol_sstChecks_vec.push_back(gSSTCheckCount.load());
+
+    // --- Hierarchical Single Column Query ---
+    // Ensure queryTrees[0] is valid before dereferencing. Already checked by
+    // queryTrees.empty()
+    gBloomCheckCount = 0;
+    gLeafBloomCheckCount = 0;
+    gSSTCheckCount = 0;
+    stopwatch.start();
+    [[maybe_unused]] std::vector<std::string> singlehierarchyMatches =
+        dbManager.findUsingSingleHierarchy(queryTrees[0], columns,
+                                           currentExpectedValues);
+    stopwatch.stop();
+    hierarchicalSingleTimes.push_back(stopwatch.elapsedMicros());
+    singleCol_bloomChecks_vec.push_back(gBloomCheckCount.load());
+    singleCol_leafBloomChecks_vec.push_back(gLeafBloomCheckCount.load());
+    singleCol_sstChecks_vec.push_back(gSSTCheckCount.load());
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  }
+
+  // Calculate statistics
+  aggregated_timings.globalScanTimeStats =
+      calculateNumericStatistics(globalScanTimes);
+  aggregated_timings.hierarchicalMultiTimeStats =
+      calculateNumericStatistics(hierarchicalMultiTimes);
+  aggregated_timings.hierarchicalSingleTimeStats =
+      calculateNumericStatistics(hierarchicalSingleTimes);
+
+  aggregated_timings.multiCol_bloomChecksStats =
+      calculateCountStatistics(multiCol_bloomChecks_vec);
+  aggregated_timings.multiCol_leafBloomChecksStats =
+      calculateCountStatistics(multiCol_leafBloomChecks_vec);
+  aggregated_timings.multiCol_sstChecksStats =
+      calculateCountStatistics(multiCol_sstChecks_vec);
+
+  aggregated_timings.singleCol_bloomChecksStats =
+      calculateCountStatistics(singleCol_bloomChecks_vec);
+  aggregated_timings.singleCol_leafBloomChecksStats =
+      calculateCountStatistics(singleCol_leafBloomChecks_vec);
+  aggregated_timings.singleCol_sstChecksStats =
+      calculateCountStatistics(singleCol_sstChecks_vec);
+
+  return aggregated_timings;
+    }

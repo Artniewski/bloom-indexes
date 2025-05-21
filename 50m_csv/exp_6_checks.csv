@@ -1,0 +1,4 @@
+numRecords,bloomSize,multiCol_bloomChecks_avg,multiCol_bloomChecks_min,multiCol_bloomChecks_max,multiCol_leafBloomChecks_avg,multiCol_leafBloomChecks_min,multiCol_leafBloomChecks_max,multiCol_sstChecks_avg,multiCol_sstChecks_min,multiCol_sstChecks_max,singleCol_bloomChecks_avg,singleCol_bloomChecks_min,singleCol_bloomChecks_max,singleCol_leafBloomChecks_avg,singleCol_leafBloomChecks_min,singleCol_leafBloomChecks_max,singleCol_sstChecks_avg,singleCol_sstChecks_min,singleCol_sstChecks_max
+50000000,500000,1201,1125,1293,445.2,372,534,6.3,3,9,672,637,690,419,384,437,57.8,47,74
+50000000,1000000,643.1,618,672,32.4,27,42,3,3,3,415.6,400,442,167,159,192,5.7,3,8
+50000000,2000000,318.5,278,348,9,9,9,3,3,3,214.6,175,233,24.3,9,33,1.2,1,2

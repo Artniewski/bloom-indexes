@@ -1,231 +1,276 @@
+#include "exp7.hpp"
+
 #include <spdlog/spdlog.h>
 
+#include <algorithm>
+#include <boost/asio/post.hpp>
+#include <boost/asio/thread_pool.hpp>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <future>
 #include <iostream>
 #include <map>
+#include <mutex>
 #include <random>
 #include <string>
 #include <thread>
+#include <tuple>
 #include <vector>
-#include <mutex>
-#include <boost/asio/thread_pool.hpp>
-#include <boost/asio/post.hpp>
 
 #include "algorithm.hpp"
 #include "bloomTree.hpp"
 #include "bloom_manager.hpp"
 #include "db_manager.hpp"
+#include "exp_utils.hpp"
 #include "stopwatch.hpp"
-
-
-
-// Import necessary declarations from main.cpp
-struct TestParams {
-    std::string dbName;
-    int numRecords;
-    int bloomTreeRatio;
-    int numberOfAttempts;
-    size_t itemsPerPartition;
-    size_t bloomSize;
-    int numHashFunctions;
-};
+#include "test_params.hpp"
 
 extern void clearBloomFilterFiles(const std::string& dbDir);
 extern boost::asio::thread_pool globalThreadPool;
+extern std::atomic<size_t> gBloomCheckCount;
+extern std::atomic<size_t> gLeafBloomCheckCount;
+extern std::atomic<size_t> gSSTCheckCount;
 
-std::map<int, std::unordered_set<int>> buildTargetMap(int numRecords, const std::vector<int>& keys) {
-    std::map<int, std::unordered_set<int>> result;
-    std::unordered_set<int> allValues; 
-    std::random_device rd;
-    std::mt19937 gen(rd());
-    std::uniform_int_distribution<int> dist(1, numRecords);
-    for (int key : keys) {
-        std::unordered_set<int> currentSet = result.empty() ? std::unordered_set<int>{} : result.rbegin()->second;
-        while (currentSet.size() < key) {
-            int value = dist(gen);
-            if (allValues.insert(value).second) {
-                currentSet.insert(value);
-            }
-        }
-        result[key] = currentSet;
-    }
-    return result;
+void writeExp7ChecksCSVHeaders() {
+  writeCsvHeader(
+      "csv/exp_7_checks.csv",
+      "numRecords,keys,sstFiles,"
+      "multiCol_bloomChecks_avg,multiCol_bloomChecks_min,"
+      "multiCol_bloomChecks_max,"
+      "multiCol_leafBloomChecks_avg,multiCol_leafBloomChecks_min,"
+      "multiCol_leafBloomChecks_max,"
+      "multiCol_sstChecks_avg,multiCol_sstChecks_min,multiCol_"
+      "sstChecks_max,"
+      "singleCol_bloomChecks_avg,singleCol_bloomChecks_min,singleCol_"
+      "bloomChecks_max,"
+      "singleCol_leafBlo omChecks_avg,singleCol_leafBloomChecks_min,"
+      "singleCol_leafBloomChecks_max,"
+      "singleCol_sstChecks_avg,singleCol_sstChecks_min,singleCol_"
+      "sstChecks_max");
 }
 
-// Kolumny: Global Scan| Hierarchical Single Column | Hierarchical Multi-Column
-// Wiersze: ilość itemów spełniających kryteria: 2, 4, 6, 8, 10
-void runExp7(std::string baseDir, bool initMode) {
-    const int dbSize = 1'000'000;
-    const std::vector<std::string> columns = {"phone", "mail", "address"};
-    const std::vector<int> targetItems = { 2, 4, 6, 8, 10};
-    
-    std::vector<int> randomIndices;
-    {
-        std::random_device rd;
-        std::mt19937 gen(rd());
-        std::uniform_int_distribution<int> dist(1, dbSize);
-        
-        std::unordered_set<int> uniqueIndices;
-        while (uniqueIndices.size() < 10) {
-            uniqueIndices.insert(dist(gen));
+void writeExp7TimingsCSVHeaders() {
+  writeCsvHeader("csv/exp_7_timings.csv",
+                 "numRecords,keys,"
+                 "hierarchicalSingleTime_avg,hierarchicalSingleTime_min,"
+                 "hierarchicalSingleTime_max,"
+                 "hierarchicalMultiTime_avg,hierarchicalMultiTime_min,"
+                 "hierarchicalMultiTime_max");
+}
+
+void writeExp7OverviewCSVHeaders() {
+  writeCsvHeader("csv/exp_7_overview.csv",
+                 "numRecords,keys,falsePositiveProbability,"
+                 "globalScanTime_avg,hierarchicalSingleTime_avg,"
+                 "hierarchicalMultiTime_avg");
+}
+
+void writeExp7SelectedAvgChecksCSVHeaders() {
+  writeCsvHeader("csv/exp_7_selected_avg_checks.csv",
+                 "numRec,keys,"
+                 "mcBloomAvg,mcLeafAvg,mcSSTAvg,"
+                 "scBloomAvg,scLeafAvg,scSSTAvg");
+}
+
+void runExp7(const std::string& dbPathToUse, size_t dbSizeToUse,
+             bool skipDbScan) {
+  const std::vector<std::string> columns = {"phone", "mail", "address"};
+  const std::vector<int> targetItemsLoopVar = {2, 4, 6, 8, 10};
+  std::vector<int> targetRecordIndices;
+  generateRandomIndexes(dbSizeToUse, 10, targetRecordIndices);
+
+  TestParams params = {
+      dbPathToUse,
+      static_cast<int>(dbSizeToUse),
+      3,        // bloomTreeRatio - default or from a config
+      1,        // numberOfAttempts - default or from a config
+      100000,   // itemsPerPartition - default or from a config
+      1000000,  // bloomSize - default or from a config
+      6         // numHashFunctions - default or from a config
+  };
+  DBManager dbManager;
+  BloomManager bloomManager;
+
+  writeExp7ChecksCSVHeaders();
+  writeExp7TimingsCSVHeaders();
+  writeExp7OverviewCSVHeaders();
+  writeExp7SelectedAvgChecksCSVHeaders();
+
+  for (const auto& numTargetRecords : targetItemsLoopVar) {
+    dbManager.openDB(params.dbName, columns);
+    std::vector<std::tuple<std::string, std::string, std::string>>
+        originalDataToRevert;
+    std::vector<std::tuple<std::string, std::string, std::string>>
+        modificationsToApply;
+    std::vector<std::string> currentExpectedValues;
+
+    for (int i = 0; i < numTargetRecords; i++) {
+      int recordIndex = targetRecordIndices[i];
+      std::string currentKey =
+          createPrefixedKeyExp7(recordIndex, params.numRecords);
+      for (const auto& column : columns) {
+        try {
+          std::string originalValue = dbManager.getValue(column, currentKey);
+          originalDataToRevert.emplace_back(currentKey, column, originalValue);
+          spdlog::info("Exp7: Stored original for key '{}', col '{}': '{}'",
+                       currentKey, column, originalValue);
+        } catch (const std::exception& e) {
+          spdlog::warn(
+              "Exp7: Failed to get original value for key '{}', col '{}': {}. "
+              "Storing empty for revert.",
+              currentKey, column, e.what());
+          originalDataToRevert.emplace_back(currentKey, column, "");
         }
-        
-        randomIndices.assign(uniqueIndices.begin(), uniqueIndices.end());
-        std::sort(randomIndices.begin(), randomIndices.end());
-        
-        std::string indicesStr;
-        for (int idx : randomIndices) {
-            indicesStr += std::to_string(idx) + ", ";
-        }
-        spdlog::info("Generated 10 random indices: {}", indicesStr);
+        std::string targetValue = column + "_target";
+        modificationsToApply.emplace_back(currentKey, column, targetValue);
+        currentExpectedValues.push_back(targetValue);
+      }
     }
 
-    DBManager dbManager;
-    BloomManager bloomManager;
-
-    std::ofstream out(baseDir + "/exp_7_bloom_metrics.csv", std::ios::app);
-    if (!out) {
-        spdlog::error("ExpBloomMetrics: Nie udało się otworzyć pliku wynikowego!");
-        return;
+    spdlog::info("Exp7: Applying modifications to DB...");
+    rocksdb::Status s_modify =
+        dbManager.applyModifications(modificationsToApply, params.numRecords);
+    if (!s_modify.ok()) {
+      spdlog::error("Exp7: Failed to apply modifications to target records: {}",
+                    s_modify.ToString());
+      dbManager.closeDB();
+      return;
     }
-    
-    out << "NumRecords,NumItems,GlobalScanTime,HierarchicalSingleTime,HierarchicalMultiTime,"
-        << "MultiBloomChecks,MultiLeafBloomChecks,MultiSSTChecks,"
-        << "SingleBloomChecks,SingleLeafBloomChecks,SingleSSTChecks\n";
 
-    for (const auto& numItems : targetItems) {
-        TestParams params = {baseDir + "/exp7_db_" + std::to_string(numItems), dbSize, 3, 1, 100000, 1'000'000, 6};
-        spdlog::info("ExpBloomMetrics: Rozpoczynam eksperyment dla bazy '{}'", params.dbName);
+    clearBloomFilterFiles(params.dbName);
 
-        clearBloomFilterFiles(params.dbName);
-        spdlog::info("Exp7: Starting experiment for DB '{}'", params.dbName);
-        dbManager.openDB(params.dbName);
+    std::map<std::string, BloomTree> hierarchies;
 
-        if (!initMode) {
-            // Create a subset of random indices based on numItems
-            std::unordered_set<int> targetIndices;
-            for (size_t i = 0; i < numItems && i < randomIndices.size(); i++) {
-                targetIndices.insert(randomIndices[i]);
-            }
-            
-            // Log which indices we're using
-            std::string indicesStr;
-            for (int idx : targetIndices) {
-                indicesStr += std::to_string(idx) + ", ";
-            }
-            spdlog::info("Using {} target indices: {}", targetIndices.size(), indicesStr);
-            
-            // Use the modified DB manager method to insert records with specific target indices
-            dbManager.insertRecordsWithSearchTargets(params.numRecords, columns, targetIndices);
-            
-            spdlog::info("ExpBloomMetrics: 10 second sleep...");
-            std::this_thread::sleep_for(std::chrono::seconds(10));
-        }
+    std::map<std::string, std::vector<std::string>> columnSstFiles =
+        scanSstFilesAsync(columns, dbManager, params);
 
-        std::map<std::string, BloomTree> hierarchies;
-        std::mutex hierarchiesMutex;
-        
-        // First asynchronously get all SST files for all columns
-        std::map<std::string, std::vector<std::string>> columnSstFiles;
-        std::vector<std::future<std::pair<std::string, std::vector<std::string>>>> scanFutures;
-        
-        for (const auto& column : columns) {
-            std::promise<std::pair<std::string, std::vector<std::string>>> scanPromise;
-            scanFutures.push_back(scanPromise.get_future());
-            
-            boost::asio::post(globalThreadPool, [column, &dbManager, &params, promise = std::move(scanPromise)]() mutable {
-                auto sstFiles = dbManager.scanSSTFilesForColumn(params.dbName, column);
-                promise.set_value(std::make_pair(column, std::move(sstFiles)));
-            });
-        }
-        
-        // Wait for all scanning to complete
-        for (auto& fut : scanFutures) {
-            auto [column, sstFiles] = fut.get();
-            columnSstFiles[column] = std::move(sstFiles);
-        }
-        
-        // Now process each column's hierarchy building sequentially
-        // (createPartitionedHierarchy already has internal parallelism)
-        for (const auto& [column, sstFiles] : columnSstFiles) {
-            BloomTree hierarchy = bloomManager.createPartitionedHierarchy(
-                sstFiles, params.itemsPerPartition, params.bloomSize, params.numHashFunctions, params.bloomTreeRatio);
-            spdlog::info("Hierarchy built for column: {}", column);
-            hierarchies.try_emplace(column, std::move(hierarchy));
-        }
-
-        // hierarchies vector
-        std::vector<BloomTree> queryTrees;
-        std::vector<std::string> expectedValues;
-
-        spdlog::info("value in half of the db: {}", columns[0] + "_value" + std::to_string(dbSize / 2));
-
-        for (const auto& column : columns) {
-            queryTrees.push_back(hierarchies.at(column));
-            const std::string expectedValue = column + "_target";
-            spdlog::info("ExpBloomMetrics: expectedValue: {}", expectedValue);
-            expectedValues.push_back(expectedValue);
-        }
-
-        // --- Global Scan Query ---
-        StopWatch stopwatch;
-        stopwatch.start();
-        std::vector<std::string> globalMatches = dbManager.scanForRecordsInColumns(columns, expectedValues);
-        stopwatch.stop();
-        auto globalScanTime = stopwatch.elapsedMicros();
-        
-        // Reset counters before multi-column query
-        gBloomCheckCount = 0;
-        gLeafBloomCheckCount = 0;
-        gSSTCheckCount = 0;
-        
-        // --- Hierarchical Multi-Column Query ---
-        stopwatch.start();
-        std::vector<std::string> hierarchicalMatches = multiColumnQueryHierarchical(queryTrees, expectedValues, "", "", dbManager);
-        stopwatch.stop();
-        auto hierarchicalMultiTime = stopwatch.elapsedMicros();
-        
-        // Save multi-column query counters
-        size_t multiBloomChecks = gBloomCheckCount.load();
-        size_t multiLeafBloomChecks = gLeafBloomCheckCount.load();
-        size_t multiSSTChecks = gSSTCheckCount.load();
-        
-        spdlog::info("Multi-column Bloom checks: {} (total), {} (leaves only), SSTables checked: {}", 
-                    multiBloomChecks, multiLeafBloomChecks, multiSSTChecks);
-        
-        // Reset counters before single hierarchy query
-        gBloomCheckCount = 0;
-        gLeafBloomCheckCount = 0;
-        gSSTCheckCount = 0;
-        
-        // --- Hierarchical Single Column Query ---
-        stopwatch.start();
-        std::vector<std::string> singlehierarchyMatches = dbManager.findUsingSingleHierarchy(queryTrees[0], columns, expectedValues);
-        stopwatch.stop();
-        auto hierarchicalSingleTime = stopwatch.elapsedMicros();
-        
-        // Save single hierarchy query counters
-        size_t singleBloomChecks = gBloomCheckCount.load();
-        size_t singleLeafBloomChecks = gLeafBloomCheckCount.load();
-        size_t singleSSTChecks = gSSTCheckCount.load();
-        
-        spdlog::info("Single Hierarchy Bloom checks: {} (total), {} (leaves only), SSTables checked: {}", 
-                    singleBloomChecks, singleLeafBloomChecks, singleSSTChecks);
-        
-        // Zapis wyników do pliku CSV with both sets of counters
-        out << params.numRecords << ","
-            << numItems << ","
-            << globalScanTime << ","
-            << hierarchicalSingleTime << ","
-            << hierarchicalMultiTime << ","
-            << multiBloomChecks << ","
-            << multiLeafBloomChecks << ","
-            << multiSSTChecks << ","
-            << singleBloomChecks << ","
-            << singleLeafBloomChecks << ","
-            << singleSSTChecks << "\n";
+    hierarchies = buildHierarchies(columnSstFiles, bloomManager, params);
+    std::vector<std::string> targetColumns;
+    for (const auto& column : columns) {
+      targetColumns.push_back(column + "_target");
     }
-} 
+    AggregatedQueryTimings timings =
+        runStandardQueriesWithTarget(dbManager, hierarchies, columns,
+                                     dbSizeToUse, 1, skipDbScan, targetColumns);
+
+    double falsePositiveProb = getProbabilityOfFalsePositive(
+        params.bloomSize, params.numHashFunctions, params.itemsPerPartition);
+
+    std::ofstream checks_csv_out("csv/exp_7_checks.csv", std::ios::app);
+    if (!checks_csv_out) {
+      spdlog::error(
+          "Exp7: Nie udało się otworzyć pliku wynikowego "
+          "csv/exp_7_checks.csv do dopisywania!");
+      return;
+    }
+    std::ofstream timings_csv_out("csv/exp_7_timings.csv", std::ios::app);
+    if (!timings_csv_out) {
+      spdlog::error(
+          "Exp7: Nie udało się otworzyć pliku wynikowego "
+          "csv/exp_7_timings.csv do dopisywania!");
+      return;
+    }
+    std::ofstream overview_csv_out("csv/exp_7_overview.csv", std::ios::app);
+    if (!overview_csv_out) {
+      spdlog::error(
+          "Exp7: Nie udało się otworzyć pliku wynikowego "
+          "csv/exp_7_overview.csv do dopisywania!");
+      return;
+    }
+    std::ofstream selected_avg_checks_csv_out(
+        "csv/exp_7_selected_avg_checks.csv", std::ios::app);
+    if (!selected_avg_checks_csv_out) {
+      spdlog::error(
+          "Exp7: Nie udało się otworzyć pliku wynikowego "
+          "csv/exp_7_selected_avg_checks.csv do dopisywania!");
+      return;
+    }
+    size_t countSSTFiles = 0;
+    for (const auto& column : columns) {
+      countSSTFiles += columnSstFiles[column].size();
+    }
+    checks_csv_out << params.numRecords << "," << numTargetRecords << ","
+                   << countSSTFiles << ","
+                   << timings.multiCol_bloomChecksStats.average << ","
+                   << timings.multiCol_bloomChecksStats.min << ","
+                   << timings.multiCol_bloomChecksStats.max << ","
+                   << timings.multiCol_leafBloomChecksStats.average << ","
+                   << timings.multiCol_leafBloomChecksStats.min << ","
+                   << timings.multiCol_leafBloomChecksStats.max << ","
+                   << timings.multiCol_sstChecksStats.average << ","
+                   << timings.multiCol_sstChecksStats.min << ","
+                   << timings.multiCol_sstChecksStats.max << ","
+                   << timings.singleCol_bloomChecksStats.average << ","
+                   << timings.singleCol_bloomChecksStats.min << ","
+                   << timings.singleCol_bloomChecksStats.max << ","
+                   << timings.singleCol_leafBloomChecksStats.average << ","
+                   << timings.singleCol_leafBloomChecksStats.min << ","
+                   << timings.singleCol_leafBloomChecksStats.max << ","
+                   << timings.singleCol_sstChecksStats.average << ","
+                   << timings.singleCol_sstChecksStats.min << ","
+                   << timings.singleCol_sstChecksStats.max << "\n";
+
+    timings_csv_out << params.numRecords << "," << numTargetRecords << ","
+                    << timings.hierarchicalSingleTimeStats.average << ","
+                    << timings.hierarchicalSingleTimeStats.min << ","
+                    << timings.hierarchicalSingleTimeStats.max << ","
+                    << timings.hierarchicalMultiTimeStats.average << ","
+                    << timings.hierarchicalMultiTimeStats.min << ","
+                    << timings.hierarchicalMultiTimeStats.max << "\n";
+
+    overview_csv_out << params.numRecords << "," << numTargetRecords << ","
+                     << falsePositiveProb << ","
+                     << timings.globalScanTimeStats.average << ","
+                     << timings.hierarchicalSingleTimeStats.average << ","
+                     << timings.hierarchicalMultiTimeStats.average << "\n";
+
+    selected_avg_checks_csv_out
+        << params.numRecords << "," << numTargetRecords << ","
+        << timings.multiCol_bloomChecksStats.average << ","
+        << timings.multiCol_leafBloomChecksStats.average << ","
+        << timings.multiCol_sstChecksStats.average << ","
+        << timings.singleCol_bloomChecksStats.average << ","
+        << timings.singleCol_leafBloomChecksStats.average << ","
+        << timings.singleCol_sstChecksStats.average << "\n";
+
+    dbManager.revertModifications(originalDataToRevert, params.numRecords);
+    dbManager.closeDB();
+    checks_csv_out.close();
+    timings_csv_out.close();
+    overview_csv_out.close();
+    selected_avg_checks_csv_out.close();
+  }
+}
+
+void generateRandomIndexes(size_t dbSize, const int numTargetRecords,
+                           std::vector<int>& targetRecordIndices) {
+  {
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_int_distribution<int> dist(1, static_cast<int>(dbSize));
+    std::unordered_set<int> unique_indices_set;
+    while (unique_indices_set.size() < numTargetRecords) {
+      unique_indices_set.insert(dist(gen));
+    }
+    targetRecordIndices.assign(unique_indices_set.begin(),
+                               unique_indices_set.end());
+    std::string indicesStr;
+    for (int idx : targetRecordIndices) {
+      indicesStr += std::to_string(idx) + ", ";
+    }
+    spdlog::info("Exp7: Generated {} target record indices: {}",
+                 targetRecordIndices.size(), indicesStr);
+  }
+}
+
+std::string createPrefixedKeyExp7(int recordIndex, int totalRecords) {
+  std::string indexStr = std::to_string(recordIndex);
+  int paddingLength = 20;
+  std::string prefix = "key";
+  if (indexStr.length() < paddingLength) {
+    return prefix + std::string(paddingLength - indexStr.length(), '0') +
+           indexStr;
+  }
+  return prefix + indexStr;
+}

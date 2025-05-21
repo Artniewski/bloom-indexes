@@ -1,0 +1,4 @@
+numRecords,itemsPerPartition,hierarchicalSingleTime_avg,hierarchicalSingleTime_min,hierarchicalSingleTime_max,hierarchicalMultiTime_avg,hierarchicalMultiTime_min,hierarchicalMultiTime_max
+50000000,50000,14183.8,13844,14551,15152.3,14578,15810
+50000000,75000,20679.9,19998,21527,21538.5,21311,21803
+50000000,100000,36350.8,27401,47372,28121.7,27304,28936

@@ -51,7 +51,6 @@ inline std::vector<std::string> finalSstScanAndIntersect(const Combo& combo,
                                                   const std::vector<std::string>& values,
                                                   DBManager& dbManager) {
     size_t n = combo.nodes.size();
-    spdlog::info("SSTables checked eee: {}", n);
 
     // Increment SSTable check count
     gSSTCheckCount += n;
@@ -106,13 +105,14 @@ inline std::vector<std::string> finalSstScanAndIntersect(const Combo& combo,
 
 // DFS with combinations level by level,
 // using only children that pass the Bloom filter.
-inline void dfsMultiColumn(const std::vector<std::string>& values, Combo currentCombo, DBManager& dbManager) {
+inline void dfsMultiColumn(const std::vector<std::string>& values, Combo currentCombo, DBManager& dbManager, bool isInitialCall) {
     // check if all nodes pass Bloom
     for (size_t i = 0; i < currentCombo.nodes.size(); ++i) {
-        ++gBloomCheckCount;
-        // Count leaf bloom checks separately
-        if (currentCombo.nodes[i]->filename != "Memory") {
-            ++gLeafBloomCheckCount;
+        if (isInitialCall) { // Only count for the initial set of nodes
+            ++gBloomCheckCount;
+            if (currentCombo.nodes[i]->filename != "Memory") {
+                ++gLeafBloomCheckCount;
+            }
         }
         
         if (!currentCombo.nodes[i]->bloom.exists(values[i])) {
@@ -147,9 +147,8 @@ inline void dfsMultiColumn(const std::vector<std::string>& values, Combo current
             candidateOptions[i] = {currentNode};
         } else {
             for (Node* child : currentNode->children) {
-                // Only include the child if it passes the Bloom filter.
+                // Count when evaluating children for the first time in this path
                 ++gBloomCheckCount;
-                // Count leaf bloom checks separately
                 if (child->filename != "Memory") {
                     ++gLeafBloomCheckCount;
                 }
@@ -175,7 +174,7 @@ inline void dfsMultiColumn(const std::vector<std::string>& values, Combo current
                 computeIntersection(chosen, newStart, newEnd);
                 if (newStart <= newEnd) {
                     Combo nextCombo{chosen, newStart, newEnd};
-                    dfsMultiColumn(values, nextCombo, dbManager);
+                    dfsMultiColumn(values, nextCombo, dbManager, false);
                 }
                 return;
             }
@@ -204,9 +203,9 @@ inline std::vector<std::string> multiColumnQueryHierarchical(std::vector<BloomTr
     }
     
     // Reset counters
-    gBloomCheckCount = 0;
-    gLeafBloomCheckCount = 0;
-    gSSTCheckCount = 0;
+    gBloomCheckCount.store(0);
+    gLeafBloomCheckCount.store(0);
+    gSSTCheckCount.store(0);
     
     size_t n = trees.size();
     Combo startCombo;
@@ -223,7 +222,7 @@ inline std::vector<std::string> multiColumnQueryHierarchical(std::vector<BloomTr
     startCombo.rangeEnd = e;
 
     globalfinalMatches.clear();
-    dfsMultiColumn(values, startCombo, dbManager);
+    dfsMultiColumn(values, startCombo, dbManager, true);
     sw.stop();
     spdlog::critical("Multi-column query with SST scan took {} µs, found matching {} keys.", sw.elapsedMicros(), globalfinalMatches.size());
     spdlog::info("Bloom filters checked: {} (total), {} (leaves only), SSTables checked: {}", 

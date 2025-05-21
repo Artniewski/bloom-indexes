@@ -1,0 +1,4 @@
+numRecords,itemsPerPartition,falsePositiveProbability,globalScanTime_avg,hierarchicalSingleTime_avg,hierarchicalMultiTime_avg
+50000000,50000,0.000303129,1.81903e+07,14183.8,15152.3
+50000000,75000,0.00226426,1.80596e+07,20679.9,21538.5
+50000000,100000,0.00843621,1.80206e+07,36350.8,28121.7

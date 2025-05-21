@@ -1,0 +1,4 @@
+numRec,itemsPart,mcBloomAvg,mcLeafAvg,mcSSTAvg,scBloomAvg,scLeafAvg,scSSTAvg
+50000000,50000,621.6,9,3,426.8,43.2,1.5
+50000000,75000,616.2,12.3,3,423.3,101.1,2
+50000000,100000,649.3,31.2,3,420.9,173.7,5.6

@@ -1,5 +1,7 @@
 #include <spdlog/spdlog.h>
 
+#include <boost/asio/post.hpp>
+#include <boost/asio/thread_pool.hpp>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -9,168 +11,130 @@
 #include <string>
 #include <thread>
 #include <vector>
-#include <mutex>
-#include <boost/asio/thread_pool.hpp>
-#include <boost/asio/post.hpp>
 
+#include "algorithm.hpp"
 #include "bloomTree.hpp"
 #include "bloom_manager.hpp"
 #include "db_manager.hpp"
+#include "exp_utils.hpp"
 #include "stopwatch.hpp"
-#include "algorithm.hpp"
-
-
-
-struct TestParams {
-    std::string dbName;
-    int numRecords;
-    int bloomTreeRatio;
-    int numberOfAttempts;
-    size_t itemsPerPartition;
-    size_t bloomSize;
-    int numHashFunctions;
-};
 
 extern void clearBloomFilterFiles(const std::string& dbDir);
 extern boost::asio::thread_pool globalThreadPool;
 
-void runExp8(std::string baseDir, bool initMode) {
-    const int dbSize = 1'000'000;
-    const std::vector<int> numColumns = {2, 4, 8, 10};
+void runExp8(std::string baseDir, bool initMode, bool skipDbScan) {
+  const int dbSize = 50'000'000;
+  const std::vector<int> numColumnsToTest = {2,3,4,5,6,7,8};
+  const int maxColumns = 10;
+  const std::string fixedDbName = baseDir + "/exp8_shared_db";
 
-    DBManager dbManager;
-    BloomManager bloomManager;
+  std::vector<std::string> allColumnNames;
+  for (int i = 0; i < maxColumns; ++i) {
+    allColumnNames.push_back("i_" + std::to_string(i) + "_column");
+  }
 
-    std::ofstream out(baseDir + "/exp_8_bloom_metrics.csv",  std::ios::app);
-    if (!out) {
-        spdlog::error("ExpBloomMetrics: Nie udało się otworzyć pliku wynikowego!");
-        return;
+  DBManager dbManager;
+  BloomManager bloomManager;
+
+  std::ofstream out("csv/exp_8_bloom_metrics.csv", std::ios::app);
+  if (!out) {
+    spdlog::error("ExpBloomMetrics: Nie udało się otworzyć pliku wynikowego!");
+    return;
+  }
+
+  out << "NumRecords,NumColumns,GlobalScanTime,HierarchicalSingleTime,"
+         "HierarchicalMultiTime,"
+      << "MultiBloomChecks,MultiLeafBloomChecks,MultiSSTChecks,"
+      << "SingleBloomChecks,SingleLeafBloomChecks,SingleSSTChecks\n";
+
+  out.close();
+
+  // --- Database Initialization (once for all 10 columns) ---
+  spdlog::info(
+      "ExpBloomMetrics: Initializing shared database '{}' with {} columns if "
+      "it doesn't exist.",
+      fixedDbName, maxColumns);
+  clearBloomFilterFiles(fixedDbName);  // Clear any old bloom files
+
+  if (std::filesystem::exists(fixedDbName)) {
+    spdlog::info(
+        "ExpBloomMetrics: Shared database '{}' already exists, skipping "
+        "initialization.",
+        fixedDbName);
+    // Open with all columns to ensure all CFs are recognized
+    dbManager.openDB(fixedDbName, allColumnNames);
+  } else {
+    dbManager.openDB(fixedDbName, allColumnNames);
+    dbManager.insertRecords(dbSize, allColumnNames);  // Insert for all columns
+    try {
+      dbManager.compactAllColumnFamilies(dbSize);
+    } catch (const std::exception& e) {
+      spdlog::error("Error during initial compaction for '{}': {}", fixedDbName,
+                    e.what());
+      exit(1);
     }
-    
-    out << "NumRecords,NumColumns,GlobalScanTime,HierarchicalSingleTime,HierarchicalMultiTime,"
-        << "MultiBloomChecks,MultiLeafBloomChecks,MultiSSTChecks,"
-        << "SingleBloomChecks,SingleLeafBloomChecks,SingleSSTChecks\n";
+  }
+  // Close DB after initialization; it will be reopened in the loop
+  dbManager.closeDB();
+  // --- End Database Initialization ---
 
-    for (const auto& numCol : numColumns) {
-        std::vector<std::string> columns;
-        for (int i = 0; i < numCol; ++i) {
-            columns.push_back("i_" + std::to_string(i) + "_column");
-        }
-        // log columns
-        for (const auto& column : columns) {
-            spdlog::info("Column: {}", column);
-        }
-
-        TestParams params = {baseDir + "/exp8_db_" + std::to_string(numCol), dbSize, 3, 1, 100000, 1'000'000, 6};
-        spdlog::info("ExpBloomMetrics: Rozpoczynam eksperyment dla bazy '{}'", params.dbName);
-        clearBloomFilterFiles(params.dbName);
-        dbManager.openDB(params.dbName, columns);
-
-        if (!initMode) {
-            dbManager.insertRecords(params.numRecords, columns);
-            spdlog::info("ExpBloomMetrics: 10 second sleep...");
-            std::this_thread::sleep_for(std::chrono::seconds(10));
-        }
-
-        std::map<std::string, BloomTree> hierarchies;
-        std::mutex hierarchiesMutex;
-        
-        // First asynchronously get all SST files for all columns
-        std::map<std::string, std::vector<std::string>> columnSstFiles;
-        std::vector<std::future<std::pair<std::string, std::vector<std::string>>>> scanFutures;
-        
-        for (const auto& column : columns) {
-            std::promise<std::pair<std::string, std::vector<std::string>>> scanPromise;
-            scanFutures.push_back(scanPromise.get_future());
-            
-            boost::asio::post(globalThreadPool, [column, &dbManager, &params, promise = std::move(scanPromise)]() mutable {
-                auto sstFiles = dbManager.scanSSTFilesForColumn(params.dbName, column);
-                promise.set_value(std::make_pair(column, std::move(sstFiles)));
-            });
-        }
-        
-        // Wait for all scanning to complete
-        for (auto& fut : scanFutures) {
-            auto [column, sstFiles] = fut.get();
-            columnSstFiles[column] = std::move(sstFiles);
-        }
-        
-        // Now process each column's hierarchy building sequentially
-        // (createPartitionedHierarchy already has internal parallelism)
-        for (const auto& [column, sstFiles] : columnSstFiles) {
-            BloomTree hierarchy = bloomManager.createPartitionedHierarchy(
-                sstFiles, params.itemsPerPartition, params.bloomSize, params.numHashFunctions, params.bloomTreeRatio);
-            spdlog::info("Hierarchy built for column: {}", column);
-            hierarchies.try_emplace(column, std::move(hierarchy));
-        }
-
-        // hierarchies vector
-        std::vector<BloomTree> queryTrees;
-        std::vector<std::string> expectedValues;
-        std::string expectedValueSuffix = "_value" + std::to_string(dbSize / 2);
-        for (const auto& column : columns) {
-            queryTrees.push_back(hierarchies.at(column));
-            expectedValues.push_back(column + expectedValueSuffix);
-        }
-
-        // --- Global Scan Query ---
-        StopWatch stopwatch;
-        stopwatch.start();
-        std::vector<std::string> globalMatches = dbManager.scanForRecordsInColumns(columns, expectedValues);
-        stopwatch.stop();
-        auto globalScanTime = stopwatch.elapsedMicros();
-        
-        // Reset counters before multi-column query
-        gBloomCheckCount = 0;
-        gLeafBloomCheckCount = 0;
-        gSSTCheckCount = 0;
-        
-        // --- Hierarchical Multi-Column Query ---
-        stopwatch.start();
-        std::vector<std::string> hierarchicalMatches = multiColumnQueryHierarchical(queryTrees, expectedValues, "", "", dbManager);
-        stopwatch.stop();
-        auto hierarchicalMultiTime = stopwatch.elapsedMicros();
-        
-        // Save multi-column query counters
-        size_t multiBloomChecks = gBloomCheckCount.load();
-        size_t multiLeafBloomChecks = gLeafBloomCheckCount.load();
-        size_t multiSSTChecks = gSSTCheckCount.load();
-        
-        spdlog::info("Multi-column Bloom checks: {} (total), {} (leaves only), SSTables checked: {}", 
-                    multiBloomChecks, multiLeafBloomChecks, multiSSTChecks);
-        
-        // Reset counters before single hierarchy query
-        gBloomCheckCount = 0;
-        gLeafBloomCheckCount = 0;
-        gSSTCheckCount = 0;
-        
-        // --- Hierarchical Single Column Query ---
-        stopwatch.start();
-        std::vector<std::string> singlehierarchyMatches = dbManager.findUsingSingleHierarchy(queryTrees[0], columns, expectedValues);
-        stopwatch.stop();
-        auto hierarchicalSingleTime = stopwatch.elapsedMicros();
-        
-        // Save single hierarchy query counters
-        size_t singleBloomChecks = gBloomCheckCount.load();
-        size_t singleLeafBloomChecks = gLeafBloomCheckCount.load();
-        size_t singleSSTChecks = gSSTCheckCount.load();
-        
-        spdlog::info("Single Hierarchy Bloom checks: {} (total), {} (leaves only), SSTables checked: {}", 
-                    singleBloomChecks, singleLeafBloomChecks, singleSSTChecks);
-        
-        // Zapis wyników do pliku CSV with both sets of counters
-        out << params.numRecords << ","
-            << numCol << ","
-            << globalScanTime << ","
-            << hierarchicalSingleTime << ","
-            << hierarchicalMultiTime << ","
-            << multiBloomChecks << ","
-            << multiLeafBloomChecks << ","
-            << multiSSTChecks << ","
-            << singleBloomChecks << ","
-            << singleLeafBloomChecks << ","
-            << singleSSTChecks << "\n";
-        
-        dbManager.closeDB();
+  for (const auto& numCol : numColumnsToTest) {
+    std::vector<std::string> currentColumns;
+    for (int i = 0; i < numCol; ++i) {
+      currentColumns.push_back(
+          allColumnNames[i]);  // Use subset of allColumnNames
     }
-} 
+    // log columns
+    spdlog::info("ExpBloomMetrics: Starting iteration for {} columns:", numCol);
+    for (const auto& column : currentColumns) {
+      spdlog::info("Using Column: {}", column);
+    }
+
+    TestParams params = {fixedDbName,  // Use the fixed DB name
+                         dbSize,      3, 1, 100000, 1'000'000, 6};
+    // The dbName in params is now the fixedDbName, logging should reflect this.
+    spdlog::info(
+        "ExpBloomMetrics: Running experiment for database '{}' using {}/{} "
+        "columns",
+        params.dbName, numCol, maxColumns);
+
+    // No need to clear bloom filter files here again if done per experiment
+    // setup
+    clearBloomFilterFiles(params.dbName);
+
+    // Open the DB with ALL column families that exist in the database.
+    // Subsequent operations will use `currentColumns` to operate on a subset.
+    dbManager.openDB(params.dbName, allColumnNames);
+
+    // scanSstFilesAsync, buildHierarchies, and runStandardQueries
+    // should internally use the 'currentColumns' to restrict their operations.
+    std::map<std::string, std::vector<std::string>> columnSstFiles =
+        scanSstFilesAsync(currentColumns, dbManager, params);
+
+    std::map<std::string, BloomTree> hierarchies =
+        buildHierarchies(columnSstFiles, bloomManager, params);
+
+    AggregatedQueryTimings timings = runStandardQueries(
+        dbManager, hierarchies, currentColumns, dbSize, 10, skipDbScan);
+
+    std::ofstream out_csv("csv/exp_8_bloom_metrics.csv", std::ios::app);
+    if (!out_csv) {
+      spdlog::error(
+          "ExpBloomMetrics: Nie udało się otworzyć pliku wynikowego!");
+      return;
+    }
+    out_csv << params.numRecords << "," << numCol << ","
+            << timings.globalScanTimeStats.average << ","
+            << timings.hierarchicalSingleTimeStats.average << ","
+            << timings.hierarchicalMultiTimeStats.average << ","
+            << timings.multiCol_bloomChecksStats.average << ","
+            << timings.multiCol_leafBloomChecksStats.average << ","
+            << timings.multiCol_sstChecksStats.average << ","
+            << timings.singleCol_bloomChecksStats.average << ","
+            << timings.singleCol_leafBloomChecksStats.average << ","
+            << timings.singleCol_sstChecksStats.average << "\n";
+    out_csv.close();
+
+    dbManager.closeDB();
+  }
+}

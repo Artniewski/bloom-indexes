@@ -49,55 +49,40 @@ void clearBloomFilterFiles(const std::string& dbDir) {
   }
 }
 
-void initializeSharedDatabase(const std::string& dbName,
-                              const std::vector<std::string>& columns,
-                              int numRecords, bool performInit) {
-    if (performInit) {
-        spdlog::info("MAIN: Initializing database '{}' with {} records.", dbName, numRecords);
-        DBManager dbManager;
-        dbManager.openDB(dbName);
-        clearBloomFilterFiles(dbName);
-        dbManager.insertRecords(numRecords, columns);
-        spdlog::info("MAIN: Completed record insertion for '{}'. Sleeping for 10s.", dbName);
-        std::this_thread::sleep_for(std::chrono::seconds(10));
-        dbManager.compactAllColumnFamilies();
-        dbManager.closeDB();
-        spdlog::info("MAIN: Database '{}' initialization complete and closed.", dbName);
-    } else {
-        spdlog::info("MAIN: Skipping initialization for database '{}'.", dbName);
-    }
-}
-
 // ##### Main function ####
 int main(int argc, char* argv[]) {
   const std::string baseDir = "db";
   if (!std::filesystem::exists(baseDir)) {
     std::filesystem::create_directory(baseDir);
   }
+  const std::string csvDir = "csv";
+  if (!std::filesystem::exists(csvDir)) {
+    std::filesystem::create_directory(csvDir);
+  }
   bool initMode = false;
+  bool skipDbScan = false;
   for (int i = 1; i < argc; ++i) {
-    if (std::string(argv[i]) == "--db") {
+    if (std::string(argv[i]) == "--build-db") {
       initMode = true;
-      break;
+    } else if (std::string(argv[i]) == "--skip-scan") {
+      skipDbScan = true;
     }
   }
 
   const std::string sharedDbName = baseDir + "/shared_exp_db";
-  const std::vector<std::string> defaultColumns = {"phone", "mail", "address"}; // Example default columns
-  const int defaultNumRecords = 20000000; // Example default record count, from TestParams
+  const std::vector<std::string> defaultColumns = {"phone", "mail", "address"};
+  const int defaultNumRecords = 50000000;
 
-  initializeSharedDatabase(sharedDbName, defaultColumns, defaultNumRecords, initMode);
-  
   try {
     // run section
-    // runExp1(baseDir, initMode);
-    // runExp2(sharedDbName, defaultNumRecords); // Pass sharedDbName, no DBManager
-    // runExp3(baseDir, initMode, sharedDbName); // TODO: Adapt runExp3 similarly
-    // runExp4(baseDir, initMode, sharedDbName); // TODO: Adapt runExp4 similarly
-    runExp5(sharedDbName, defaultNumRecords);
-    runExp6(sharedDbName, defaultNumRecords);
-    // runExp7(baseDir, initMode);
-    // runExp8(baseDir, initMode);
+    // runExp1(baseDir, initMode, sharedDbName, defaultNumRecords, skipDbScan);
+    // EXP 2 included in exp5 run
+    // EXP 3 included in exp1 first run (creating DB)
+    // EXP 4 included in exp1 first run (running queries)
+    // runExp5(sharedDbName, defaultNumRecords, skipDbScan);
+    // runExp6(sharedDbName, defaultNumRecords, skipDbScan);
+    // runExp7(sharedDbName, defaultNumRecords, skipDbScan);
+    runExp8(baseDir, initMode, skipDbScan);
   } catch (const std::exception& e) {
     spdlog::error("[Error] {}", e.what());
     return EXIT_FAILURE;

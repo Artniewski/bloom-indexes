@@ -1,0 +1,4 @@
+numRecords,bloomSize,hierarchicalSingleTime_avg,hierarchicalSingleTime_min,hierarchicalSingleTime_max,hierarchicalMultiTime_avg,hierarchicalMultiTime_min,hierarchicalMultiTime_max
+50000000,500000,193396,146264,239326,59613.7,29647,84278
+50000000,1000000,32288.9,27158,47233,28052.5,27621,28406
+50000000,2000000,27160.4,26638,27457,28170.3,27855,28592

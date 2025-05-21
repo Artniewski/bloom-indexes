@@ -1,0 +1,4 @@
+dbSize,globalScanTime,hierarchicalMultiColumnTime,hierarchicalSingleColumnTime
+10000000,3.61515e+06,27767.8,27321.9
+20000000,7.31252e+06,27362.2,26878.9
+50000000,1.84175e+07,28333,33001.7

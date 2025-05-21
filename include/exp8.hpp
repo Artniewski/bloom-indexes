@@ -2,4 +2,4 @@
 
 #include <string>
 
-void runExp8(std::string baseDir, bool initMode); 
+void runExp8(std::string baseDir, bool initMode, bool skipDbScan); 

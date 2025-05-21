@@ -1,5 +1,9 @@
+#include "exp1.hpp"
+
 #include <spdlog/spdlog.h>
 
+#include <boost/asio/post.hpp>
+#include <boost/asio/thread_pool.hpp>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -9,120 +13,124 @@
 #include <string>
 #include <thread>
 #include <vector>
-#include <mutex>
-#include <boost/asio/thread_pool.hpp>
-#include <boost/asio/post.hpp>
 
+#include "algorithm.hpp"
 #include "bloomTree.hpp"
 #include "bloom_manager.hpp"
 #include "db_manager.hpp"
-#include "algorithm.hpp"
-
-struct TestParams {
-    std::string dbName;
-    int numRecords;
-    int bloomTreeRatio;
-    int numberOfAttempts;
-    size_t itemsPerPartition;
-    size_t bloomSize;
-    int numHashFunctions;
-};
+#include "exp_utils.hpp"
+#include "stopwatch.hpp"
 
 extern void clearBloomFilterFiles(const std::string& dbDir);
 extern boost::asio::thread_pool globalThreadPool;
 
-void runExp1(std::string baseDir, bool initMode) {
-    // Zapis headerow
-    std::ofstream out(baseDir + "/exp_1_bloom_metrics.csv", std::ios::app);
+void writeCsvExp3Headers() {
+  writeCsvHeader("csv/exp_3_bloom_metrics.csv",
+                 "numRecords,bloomCreationTime,dbCreationTime");
+}
+
+void runExp1(std::string baseDir, bool initMode, std::string sharedDbName,
+             int defaultNumRecords, bool skipDbScan) {
+  writeCsvHeaders();
+
+  const std::vector<std::string> columns = {"phone", "mail", "address"};
+  const std::vector<int> dbSizes = {10'000'000, 20'000'000, 50'000'000};
+
+  DBManager dbManager;
+  BloomManager bloomManager;
+  StopWatch stopwatch;
+
+  for (const auto& dbSize : dbSizes) {
+    std::string dbName = (dbSize == defaultNumRecords)
+                             ? sharedDbName
+                             : baseDir + "/exp1_db_" + std::to_string(dbSize);
+    TestParams params = {dbName, dbSize, 3, 1, 100000, 1'000'000, 6};
+    spdlog::info("ExpBloomMetrics: Rozpoczynam eksperyment dla bazy '{}'",
+                 params.dbName);
+    clearBloomFilterFiles(params.dbName);
+
+    stopwatch.start();
+    if (std::filesystem::exists(params.dbName)) {
+      spdlog::info(
+          "EXP1: Database '{}' already exists, skipping initialization.",
+          params.dbName);
+      dbManager.openDB(params.dbName, columns);
+    } else {
+      dbManager.openDB(params.dbName, columns);
+      dbManager.insertRecords(params.numRecords, columns);
+      try {
+        dbManager.compactAllColumnFamilies(params.numRecords);
+      } catch (const std::exception& e) {
+        spdlog::error("Error '{}'", e.what());
+        exit(1);
+      }
+    }
+    stopwatch.stop();
+    auto dbCreationTime = stopwatch.elapsedMicros();
+
+    stopwatch.start();
+    std::map<std::string, std::vector<std::string>> columnSstFiles =
+        scanSstFilesAsync(columns, dbManager, params);
+    std::map<std::string, BloomTree> hierarchies;
+    hierarchies = buildHierarchies(columnSstFiles, bloomManager, params);
+    stopwatch.stop();
+    auto bloomCreationTime = stopwatch.elapsedMicros();
+
+    size_t totalDiskBloomSize = 0;
+    size_t totalMemoryBloomSize = 0;
+    for (const auto& kv : hierarchies) {
+      const BloomTree& tree = kv.second;
+      totalDiskBloomSize += tree.diskSize();
+      totalMemoryBloomSize += tree.memorySize();
+    }
+
+    std::ofstream out("csv/exp_1_bloom_metrics.csv", std::ios::app);
     if (!out) {
-        spdlog::error("ExpBloomMetrics: Nie udało się otworzyć pliku wynikowego!");
-        return;
+      spdlog::error(
+          "ExpBloomMetrics: Nie udało się otworzyć pliku wynikowego!");
+      return;
     }
-    out << "numRecords,bloomTreeRatio,itemsPerPartition,bloomSize,numHashFunctions,singleHierarchyLeafs,bloomDiskSize,blomMemSize" << "\n";
+    out << params.numRecords << "," << params.bloomTreeRatio << ","
+        << params.itemsPerPartition << "," << params.bloomSize << ","
+        << params.numHashFunctions << ","
+        << hierarchies.at(columns[0]).leafNodes.size() << ","
+        << totalDiskBloomSize << "," << totalMemoryBloomSize << "\n";
     out.close();
-
-    const std::vector<std::string> columns = {"phone", "mail", "address"};
-    const std::vector<int> dbSizes = {10'000'000, 2'000'000, 3'000'000};
-
-    DBManager dbManager;
-    BloomManager bloomManager;
-
-    for (const auto& dbSize : dbSizes) {
-        TestParams params = {baseDir + "/exp1_db_" + std::to_string(dbSize), dbSize, 3, 1, 100000, 1'000'000, 6};
-        spdlog::info("ExpBloomMetrics: Rozpoczynam eksperyment dla bazy '{}'", params.dbName);
-        clearBloomFilterFiles(params.dbName);
-        dbManager.openDB(params.dbName, columns);
-
-        if (!initMode) {
-            dbManager.insertRecords(params.numRecords, columns);
-            try {
-                dbManager.compactAllColumnFamilies();
-            } catch (const std::exception& e) {
-                spdlog::error("Error '{}'", e.what());
-                exit(1);
-            }
-            spdlog::info("ExpBloomMetrics: 10 second sleep...");
-            std::this_thread::sleep_for(std::chrono::seconds(10));
-        }
-
-        std::map<std::string, BloomTree> hierarchies;
-        std::mutex hierarchiesMutex;
-
-        // First asynchronously get all SST files for all columns
-        std::map<std::string, std::vector<std::string>> columnSstFiles;
-        std::vector<std::future<std::pair<std::string, std::vector<std::string>>>> scanFutures;
-        
-        for (const auto& column : columns) {
-            std::promise<std::pair<std::string, std::vector<std::string>>> scanPromise;
-            scanFutures.push_back(scanPromise.get_future());
-            
-            boost::asio::post(globalThreadPool, [column, &dbManager, &params, promise = std::move(scanPromise)]() mutable {
-                auto sstFiles = dbManager.scanSSTFilesForColumn(params.dbName, column);
-                promise.set_value(std::make_pair(column, std::move(sstFiles)));
-            });
-        }
-        
-        // Wait for all scanning to complete
-        for (auto& fut : scanFutures) {
-            auto [column, sstFiles] = fut.get();
-            columnSstFiles[column] = std::move(sstFiles);
-        }
-        
-        // Now process each column's hierarchy building sequentially
-        // (createPartitionedHierarchy already has internal parallelism)
-        for (const auto& [column, sstFiles] : columnSstFiles) {
-            BloomTree hierarchy = bloomManager.createPartitionedHierarchy(
-                sstFiles, params.itemsPerPartition, params.bloomSize, params.numHashFunctions, params.bloomTreeRatio);
-            spdlog::info("Hierarchy built for column: {}", column);
-            hierarchies.try_emplace(column, std::move(hierarchy));
-        }
-
-        size_t totalDiskBloomSize = 0;
-        size_t totalMemoryBloomSize = 0;
-        for (const auto& kv : hierarchies) {
-            const BloomTree& tree = kv.second;
-            totalDiskBloomSize += tree.diskSize();
-            totalMemoryBloomSize += tree.memorySize();
-        }
-
-        auto allDbSize = 0;
-
-        // Zapis wyników do pliku CSV
-        std::ofstream out(baseDir + "/exp_1_bloom_metrics.csv", std::ios::app);
-        if (!out) {
-            spdlog::error("ExpBloomMetrics: Nie udało się otworzyć pliku wynikowego!");
-            return;
-        }
-        out << params.numRecords << ","
-            << params.bloomTreeRatio << ","
-            << params.itemsPerPartition << ","
-            << params.bloomSize << ","
-            << params.numHashFunctions << ","
-            << hierarchies.at(columns[0]).leafNodes.size() << ","
-            << totalDiskBloomSize << ","
-            << totalMemoryBloomSize << "\n";
-        out.close();
-        dbManager.closeDB();
-        spdlog::info("ExpBloomMetrics: Eksperyment dla bazy '{}' zakończony.", params.dbName);
+    spdlog::info("ExpBloomMetrics: Eksperyment dla bazy '{}' zakończony.",
+                 params.dbName);
+    writeCsvExp3Headers();
+    std::ofstream outExp3("csv/exp_3_bloom_metrics.csv", std::ios::app);
+    if (!outExp3) {
+      spdlog::error(
+          "ExpBloomMetrics: Nie udało się otworzyć pliku wynikowego!");
+      return;
     }
-} 
+    outExp3 << params.numRecords << "," << dbCreationTime << ","
+            << bloomCreationTime << "\n";
+    outExp3.close();
+
+    AggregatedQueryTimings timings = runStandardQueries(
+        dbManager, hierarchies, columns, dbSize, 10, skipDbScan);
+
+    std::ofstream outExp4("csv/exp_4_query_timings.csv", std::ios::app);
+    if (!outExp4) {
+      spdlog::error(
+          "ExpBloomMetrics: Nie udało się otworzyć pliku wynikowego!");
+      return;
+    }
+    outExp4 << "dbSize,globalScanTime,hierarchicalMultiColumnTime,"
+           "hierarchicalSingleColumnTime\n";
+    outExp4 << dbSize << "," << timings.globalScanTimeStats.average << ","
+        << timings.hierarchicalMultiTimeStats.average << ","
+        << timings.hierarchicalSingleTimeStats.average << "\n";
+    outExp4.close();
+    dbManager.closeDB();
+  }
+}
+
+void writeCsvHeaders() {
+  writeCsvHeader(
+      "csv/exp_1_bloom_metrics.csv",
+      "numRecords,bloomTreeRatio,itemsPerPartition,bloomSize,numHashFunctions,"
+      "singleHierarchyLeafs,bloomDiskSize,blomMemSize");
+}

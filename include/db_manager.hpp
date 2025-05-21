@@ -15,7 +15,7 @@
 
 class DBManager {
  public:
-  void compactAllColumnFamilies();
+  void compactAllColumnFamilies(size_t numRecords = 0);
   void openDB(const std::string &dbname,
               std::vector<std::string> columns = {"phone", "mail", "address"});
   void insertRecords(int numRecords, std::vector<std::string> columns);
@@ -25,7 +25,22 @@ class DBManager {
   std::vector<std::string> scanSSTFilesForColumn(const std::string &dbname,
                                                  const std::string &column);
   bool isOpen() const { return static_cast<bool>(db_); }
-  void closeDB();
+  rocksdb::Status closeDB();
+
+  std::string getValue(const std::string &column_family_name,
+                       const std::string &key);
+  rocksdb::ColumnFamilyHandle *getColumnFamilyHandle(
+      const std::string &column_family_name);
+
+  rocksdb::Status applyModifications(
+      const std::vector<std::tuple<std::string, std::string, std::string>>
+          &modifications,
+      size_t numRecords);
+  rocksdb::Status revertModifications(
+      const std::vector<std::tuple<std::string, std::string, std::string>>
+          &reversions,
+      size_t numRecords);
+
   // key - value
   bool checkValueWithoutBloomFilters(const std::string &value);
   bool ScanFileForValue(const std::string &filename, const std::string &value);

@@ -1,0 +1,4 @@
+numRecords,bloomSize,falsePositiveProbability,globalScanTime_avg,hierarchicalSingleTime_avg,hierarchicalMultiTime_avg
+50000000,500000,0.11645,1.77702e+07,193396,59613.7
+50000000,1000000,0.00843621,1.81124e+07,32288.9,28052.5
+50000000,2000000,0.000303129,1.80581e+07,27160.4,28170.3
