@@ -24,9 +24,11 @@ extern boost::asio::thread_pool globalThreadPool;
 
 void runExp8(std::string baseDir, bool initMode, bool skipDbScan) {
   const int dbSize = 50'000'000;
-  const std::vector<int> numColumnsToTest = {2,3,4,5,6,7,8};
-  const int maxColumns = 10;
+  const int maxColumns = 12;
+  const std::vector<int> numColumnsToTest = {4,8,10,maxColumns};
+  
   const std::string fixedDbName = baseDir + "/exp8_shared_db";
+  const int numQueriesPerScenario = 100;
 
   std::vector<std::string> allColumnNames;
   for (int i = 0; i < maxColumns; ++i) {
@@ -36,6 +38,7 @@ void runExp8(std::string baseDir, bool initMode, bool skipDbScan) {
   DBManager dbManager;
   BloomManager bloomManager;
 
+  // Initialize standard metrics CSV
   std::ofstream out("csv/exp_8_bloom_metrics.csv", std::ios::app);
   if (!out) {
     spdlog::error("ExpBloomMetrics: Nie udało się otworzyć pliku wynikowego!");
@@ -48,6 +51,37 @@ void runExp8(std::string baseDir, bool initMode, bool skipDbScan) {
       << "SingleBloomChecks,SingleLeafBloomChecks,SingleSSTChecks\n";
 
   out.close();
+
+  // Initialize pattern metrics CSV
+  std::ofstream pattern_out("csv/exp_8_false_query.csv", std::ios::app);
+  if (!pattern_out) {
+    spdlog::error("ExpBloomMetrics: Nie udało się otworzyć pliku pattern CSV!");
+    return;
+  }
+
+  pattern_out << "NumRecords,NumColumns,PercentageExisting,HierarchicalSingleTime,"
+                 "HierarchicalMultiTime,"
+              << "MultiBloomChecks,MultiLeafBloomChecks,MultiSSTChecks,"
+              << "SingleBloomChecks,SingleLeafBloomChecks,SingleSSTChecks\n";
+
+  pattern_out.close();
+
+
+  // Initialize comprehensive analysis CSV
+  std::ofstream comprehensive_out("csv/exp_8_comprehensive_analysis.csv", std::ios::app);
+  if (!comprehensive_out) {
+    spdlog::error("ExpBloomMetrics: Nie udało się otworzyć pliku comprehensive analysis CSV!");
+    return;
+  }
+
+  comprehensive_out << "NumRecords,NumColumns,RealDataPercentage,TotalQueries,RealQueries,FalseQueries,"
+                       "AvgHierarchicalMultiTime,AvgHierarchicalSingleTime,"
+                       "AvgRealDataMultiTime,AvgRealDataSingleTime,AvgFalseDataMultiTime,AvgFalseDataSingleTime,"
+                    << "AvgMultiBloomChecks,AvgMultiLeafBloomChecks,AvgMultiSSTChecks,"
+                    << "AvgSingleBloomChecks,AvgSingleLeafBloomChecks,AvgSingleSSTChecks,"
+                    << "AvgRealMultiBloomChecks,AvgRealMultiSSTChecks,AvgFalseMultiBloomChecks,AvgFalseMultiSSTChecks\n";
+
+  comprehensive_out.close();
 
   // --- Database Initialization (once for all 10 columns) ---
   spdlog::info(
@@ -114,9 +148,28 @@ void runExp8(std::string baseDir, bool initMode, bool skipDbScan) {
     std::map<std::string, BloomTree> hierarchies =
         buildHierarchies(columnSstFiles, bloomManager, params);
 
+    // Run standard queries first
     AggregatedQueryTimings timings = runStandardQueries(
-        dbManager, hierarchies, currentColumns, dbSize, 10, skipDbScan);
+        dbManager, hierarchies, currentColumns, dbSize, 100, skipDbScan);
 
+    // Then run pattern-based queries
+    spdlog::info("ExpBloomMetrics: Running pattern-based queries for {} columns", numCol);
+    std::vector<PatternQueryResult> results = runPatternQueriesWithCsvData(
+        dbManager, hierarchies, currentColumns, dbSize);
+    
+    spdlog::info("ExpBloomMetrics: Generated {} pattern results for {} columns", 
+                 results.size(), numCol);
+
+    
+    spdlog::info("ExpBloomMetrics: Running comprehensive analysis for {} columns with {} queries per scenario", 
+                 numCol, numQueriesPerScenario);
+    std::vector<AccumulatedQueryMetrics> comprehensiveResults = runComprehensiveQueryAnalysis(
+        dbManager, hierarchies, currentColumns, dbSize, numQueriesPerScenario);
+    
+    spdlog::info("ExpBloomMetrics: Generated {} comprehensive analysis results for {} columns", 
+                 comprehensiveResults.size(), numCol);
+
+    // Write standard query results to original CSV
     std::ofstream out_csv("csv/exp_8_bloom_metrics.csv", std::ios::app);
     if (!out_csv) {
       spdlog::error(
@@ -134,6 +187,54 @@ void runExp8(std::string baseDir, bool initMode, bool skipDbScan) {
             << timings.singleCol_leafBloomChecksStats.average << ","
             << timings.singleCol_sstChecksStats.average << "\n";
     out_csv.close();
+
+    // Write pattern-based query results to separate CSV
+    std::ofstream pattern_csv("csv/exp_8_false_query.csv", std::ios::app);
+    if (!pattern_csv) {
+      spdlog::error(
+          "ExpBloomMetrics: Nie udało się otworzyć pliku pattern CSV!");
+      return;
+    }
+    
+    // Write each pattern result as a separate row
+    for (const auto& result : results) {
+      pattern_csv << params.numRecords << "," << numCol << ","
+                  << result.percent << ","
+                  << result.hierarchicalSingleTime << ","
+                  << result.hierarchicalMultiTime << ","
+                  << result.multiCol_bloomChecks << ","
+                  << result.multiCol_leafBloomChecks << ","
+                  << result.multiCol_sstChecks << ","
+                  << result.singleCol_bloomChecks << ","
+                  << result.singleCol_leafBloomChecks << ","
+                  << result.singleCol_sstChecks << "\n";
+    }
+    pattern_csv.close();
+
+
+    // Write comprehensive analysis results to separate CSV
+    std::ofstream comprehensive_csv("csv/exp_8_comprehensive_analysis.csv", std::ios::app);
+    if (!comprehensive_csv) {
+      spdlog::error(
+          "ExpBloomMetrics: Nie udało się otworzyć pliku comprehensive analysis CSV!");
+      return;
+    }
+    
+    // Write each comprehensive analysis result as a separate row
+    for (const auto& result : comprehensiveResults) {
+      comprehensive_csv << params.numRecords << "," << numCol << ","
+                        << result.realDataPercentage << "," << result.totalQueries << ","
+                        << result.realQueries << "," << result.falseQueries << ","
+                        << result.avgHierarchicalMultiTime << "," << result.avgHierarchicalSingleTime << ","
+                        << result.avgRealDataMultiTime << "," << result.avgRealDataSingleTime << ","
+                        << result.avgFalseDataMultiTime << "," << result.avgFalseDataSingleTime << ","
+                        << result.avgMultiBloomChecks << "," << result.avgMultiLeafBloomChecks << ","
+                        << result.avgMultiSSTChecks << "," << result.avgSingleBloomChecks << ","
+                        << result.avgSingleLeafBloomChecks << "," << result.avgSingleSSTChecks << ","
+                        << result.avgRealMultiBloomChecks << "," << result.avgRealMultiSSTChecks << ","
+                        << result.avgFalseMultiBloomChecks << "," << result.avgFalseMultiSSTChecks << "\n";
+    }
+    comprehensive_csv.close();
 
     dbManager.closeDB();
   }

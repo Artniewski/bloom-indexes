@@ -4,9 +4,12 @@
 
 #include <boost/asio/post.hpp>
 #include <boost/asio/thread_pool.hpp>
+#include <chrono>
 #include <cmath>
 #include <fstream>
 #include <random>
+#include <sstream>
+#include <thread>
 
 #include "algorithm.hpp"
 #include "bloomTree.hpp"
@@ -309,7 +312,7 @@ AggregatedQueryTimings runStandardQueriesWithTarget(
     DBManager& dbManager, const std::map<std::string, BloomTree>& hierarchies,
     const std::vector<std::string>& columns, size_t dbSize, int numRuns,
     bool skipDbScan, std::vector<std::string> currentExpectedValues) {
-        AggregatedQueryTimings aggregated_timings;
+  AggregatedQueryTimings aggregated_timings;
 
   std::vector<long long> globalScanTimes, hierarchicalMultiTimes,
       hierarchicalSingleTimes;
@@ -423,4 +426,456 @@ AggregatedQueryTimings runStandardQueriesWithTarget(
       calculateCountStatistics(singleCol_sstChecks_vec);
 
   return aggregated_timings;
+}
+
+// Helper function to generate dynamic patterns based on column count
+// Generates patterns where we gradually increase the number of existing values
+// (t) from left to right: For 4 columns: [n,n,n,n], [t,n,n,n], [t,t,n,n],
+// [t,t,t,n], [t,t,t,t]
+std::vector<std::vector<bool>> generateDynamicPatterns(size_t numColumns) {
+  std::vector<std::vector<bool>> patterns;
+
+  for (size_t numExisting = 0; numExisting <= numColumns; ++numExisting) {
+    std::vector<bool> pattern(numColumns, false);  // Start with all n (false)
+
+    // Set first numExisting columns to true (existing values)
+    for (size_t i = 0; i < numExisting; ++i) {
+      pattern[i] = true;
     }
+
+    patterns.push_back(pattern);
+  }
+
+  return patterns;
+}
+
+void testPatternGeneration() {
+  spdlog::info("Testing pattern generation:");
+
+  for (size_t numCols = 2; numCols <= 5; ++numCols) {
+    spdlog::info("For {} columns:", numCols);
+    auto patterns = generateDynamicPatterns(numCols);
+
+    for (size_t i = 0; i < patterns.size(); ++i) {
+      std::string patternStr = "[";
+      for (size_t j = 0; j < patterns[i].size(); ++j) {
+        patternStr += (patterns[i][j] ? "t" : "n");
+        if (j < patterns[i].size() - 1) patternStr += ",";
+      }
+      patternStr += "]";
+
+      size_t existingCount = 0;
+      for (bool val : patterns[i]) {
+        if (val) existingCount++;
+      }
+      double percentage = static_cast<double>(existingCount) / numCols * 100.0;
+
+      spdlog::info("  Pattern {}: {} ({}% existing)", i, patternStr,
+                   percentage);
+    }
+  }
+}
+
+std::vector<PatternQueryResult> runPatternQueriesWithCsvData(
+    DBManager& dbManager, const std::map<std::string, BloomTree>& hierarchies,
+    const std::vector<std::string>& columns, size_t dbSize) {
+  std::vector<PatternQueryResult> results;
+
+  // Setup query trees
+  if (hierarchies.empty() || columns.empty()) {
+    spdlog::warn(
+        "runPatternQueriesWithCsvData: Hierarchies map or "
+        "columns vector is empty, skipping query execution.");
+    return results;
+  }
+
+  std::vector<BloomTree> queryTrees;
+  queryTrees.reserve(columns.size());
+  for (const auto& column : columns) {
+    auto it = hierarchies.find(column);
+    if (it == hierarchies.end()) {
+      spdlog::error(
+          "runPatternQueriesWithCsvData: Hierarchy for column "
+          "'{}' not found. Skipping query execution.",
+          column);
+      return results;
+    }
+    queryTrees.push_back(it->second);
+  }
+
+  if (queryTrees.empty()) {
+    spdlog::error(
+        "runPatternQueriesWithCsvData: No query trees were "
+        "prepared, possibly due to missing hierarchies. Skipping query "
+        "execution.");
+    return results;
+  }
+
+  // Define non-existing record patterns
+  // t = existing value, n = non-existing value
+  std::vector<std::vector<bool>> patterns =
+      generateDynamicPatterns(columns.size());
+
+  // Log the generated patterns for debugging
+  spdlog::info("Generated {} patterns for {} columns:", patterns.size(),
+               columns.size());
+  for (size_t i = 0; i < patterns.size(); ++i) {
+    std::string patternStr = "[";
+    for (size_t j = 0; j < patterns[i].size(); ++j) {
+      patternStr += (patterns[i][j] ? "t" : "n");
+      if (j < patterns[i].size() - 1) patternStr += ",";
+    }
+    patternStr += "]";
+    spdlog::info("Pattern {}: {}", i, patternStr);
+  }
+
+  std::random_device rd;
+  std::mt19937 generator(rd());
+  std::uniform_int_distribution<size_t> distribution(1, dbSize);
+
+  StopWatch stopwatch;
+  std::vector<std::string> currentExpectedValues;
+  results.reserve(patterns.size());
+
+  for (int i = 0; i < patterns.size(); ++i) {
+    currentExpectedValues.clear();
+    currentExpectedValues.reserve(columns.size());
+
+    const auto& pattern = patterns[i];
+
+    size_t existingId = distribution(generator);
+
+    std::string existingValueSuffix = "_value" + std::to_string(existingId);
+    std::string nonExistingValueSuffix = "_wrong" + std::to_string(existingId);
+
+    size_t existingCount = 0;
+    for (size_t colIdx = 0; colIdx < columns.size() && colIdx < pattern.size();
+         ++colIdx) {
+      if (pattern[colIdx]) {
+        existingCount++;
+      }
+    }
+
+    double percentageExisting =
+        static_cast<double>(existingCount) / columns.size() * 100.0;
+
+    spdlog::info("Run: Using pattern index {} with {}% existing columns", i,
+                 percentageExisting);
+
+    // Generate values based on pattern
+    for (size_t colIdx = 0; colIdx < columns.size() && colIdx < pattern.size();
+         ++colIdx) {
+      if (pattern[colIdx]) {
+        // existing value
+        currentExpectedValues.push_back(columns[colIdx] + existingValueSuffix);
+      } else {
+        // non-existing value
+        currentExpectedValues.push_back(columns[colIdx] +
+                                        nonExistingValueSuffix);
+      }
+    }
+
+    PatternQueryResult result;
+    result.percent = percentageExisting;
+
+    // --- Hierarchical Multi-Column Query ---
+    gBloomCheckCount = 0;
+    gLeafBloomCheckCount = 0;
+    gSSTCheckCount = 0;
+    stopwatch.start();
+    [[maybe_unused]] std::vector<std::string> hierarchicalMatches =
+        multiColumnQueryHierarchical(queryTrees, currentExpectedValues, "", "",
+                                     dbManager);
+    stopwatch.stop();
+    result.hierarchicalMultiTime = stopwatch.elapsedMicros();
+    result.multiCol_bloomChecks = gBloomCheckCount.load();
+    result.multiCol_leafBloomChecks = gLeafBloomCheckCount.load();
+    result.multiCol_sstChecks = gSSTCheckCount.load();
+
+    // --- Hierarchical Single Column Query ---
+    gBloomCheckCount = 0;
+    gLeafBloomCheckCount = 0;
+    gSSTCheckCount = 0;
+    stopwatch.start();
+    [[maybe_unused]] std::vector<std::string> singlehierarchyMatches =
+        dbManager.findUsingSingleHierarchy(queryTrees[0], columns,
+                                           currentExpectedValues);
+    stopwatch.stop();
+    result.hierarchicalSingleTime = stopwatch.elapsedMicros();
+    result.singleCol_bloomChecks = gBloomCheckCount.load();
+    result.singleCol_leafBloomChecks = gLeafBloomCheckCount.load();
+    result.singleCol_sstChecks = gSSTCheckCount.load();
+
+    results.push_back(result);
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  }
+
+  return results;
+}
+
+std::vector<MixedQueryResult> runMixedQueriesWithCsvData(
+    DBManager& dbManager, const std::map<std::string, BloomTree>& hierarchies,
+    const std::vector<std::string>& columns, size_t dbSize, int numQueries, 
+    double realDataPercentage) {
+  std::vector<MixedQueryResult> results;
+
+  // Setup query trees
+  if (hierarchies.empty() || columns.empty()) {
+    spdlog::warn(
+        "runMixedQueriesWithCsvData: Hierarchies map or "
+        "columns vector is empty, skipping query execution.");
+    return results;
+  }
+
+  std::vector<BloomTree> queryTrees;
+  queryTrees.reserve(columns.size());
+  for (const auto& column : columns) {
+    auto it = hierarchies.find(column);
+    if (it == hierarchies.end()) {
+      spdlog::error(
+          "runMixedQueriesWithCsvData: Hierarchy for column "
+          "'{}' not found. Skipping query execution.",
+          column);
+      return results;
+    }
+    queryTrees.push_back(it->second);
+  }
+
+  if (queryTrees.empty()) {
+    spdlog::error(
+        "runMixedQueriesWithCsvData: No query trees were "
+        "prepared, possibly due to missing hierarchies. Skipping query "
+        "execution.");
+    return results;
+  }
+
+  // Calculate how many queries should have real data
+  int numRealQueries = static_cast<int>(std::round(numQueries * realDataPercentage / 100.0));
+  int numFalseQueries = numQueries - numRealQueries;
+
+  spdlog::info("runMixedQueriesWithCsvData: Running {} total queries: {} with real data ({}%), {} with false data ({}%)",
+               numQueries, numRealQueries, realDataPercentage, numFalseQueries, 100.0 - realDataPercentage);
+
+  // Generate permutation patterns for columns (focusing on cases where first column is true)
+  std::vector<std::vector<bool>> patterns = generateDynamicPatterns(columns.size());
+  
+  spdlog::info("runMixedQueriesWithCsvData: Generated {} permutation patterns for {} columns", 
+               patterns.size(), columns.size());
+
+  std::vector<bool> isRealDataQuery(numQueries, false);
+  for (int i = 0; i < numRealQueries; ++i) {
+    isRealDataQuery[i] = true;
+  }
+
+  // Shuffle
+  std::random_device rd;
+  std::mt19937 generator(rd());
+  std::shuffle(isRealDataQuery.begin(), isRealDataQuery.end(), generator);
+
+  std::uniform_int_distribution<size_t> distribution(1, dbSize);
+  StopWatch stopwatch;
+  std::vector<std::string> currentExpectedValues;
+  results.reserve(numQueries);
+
+  for (int queryIdx = 0; queryIdx < numQueries; ++queryIdx) {
+    currentExpectedValues.clear();
+    currentExpectedValues.reserve(columns.size());
+
+    bool useRealData = isRealDataQuery[queryIdx];
+    std::vector<bool> pattern;
+    
+    if (useRealData) {
+      // Use the last pattern (all true) for real data
+      pattern = patterns.back();
+    } else {
+      // Use one of the permutation patterns (except the last one) for false data
+      size_t patternIndex = queryIdx % (patterns.size() - 1);
+      pattern = patterns[patternIndex];
+    }
+    
+    size_t randomId = distribution(generator);
+
+    std::string existingValueSuffix = "_value" + std::to_string(randomId);
+    std::string nonExistingValueSuffix = "_wrong" + std::to_string(randomId);
+
+    // Count existing columns for logging
+    size_t existingCount = 0;
+    for (bool val : pattern) {
+      if (val) existingCount++;
+    }
+    double percentageExisting = static_cast<double>(existingCount) / columns.size() * 100.0;
+
+    if (useRealData) {
+      spdlog::info("Query {}: Using REAL data (all true pattern) with ID {}", 
+                   queryIdx + 1, randomId);
+    } else {
+      size_t patternIndex = queryIdx % (patterns.size() - 1);
+      spdlog::info("Query {}: Using FALSE data (pattern {} - {}% existing) with ID {}", 
+                   queryIdx + 1, patternIndex, percentageExisting, randomId);
+    }
+
+    // Generate values based on pattern
+    for (size_t colIdx = 0; colIdx < columns.size() && colIdx < pattern.size(); ++colIdx) {
+      if (pattern[colIdx]) {
+        // existing value
+        currentExpectedValues.push_back(columns[colIdx] + existingValueSuffix);
+      } else {
+        // non-existing value
+        currentExpectedValues.push_back(columns[colIdx] + nonExistingValueSuffix);
+      }
+    }
+
+    MixedQueryResult result;
+    result.queryIndex = queryIdx;
+    result.isRealData = useRealData;
+
+    // --- Hierarchical Multi-Column Query ---
+    gBloomCheckCount = 0;
+    gLeafBloomCheckCount = 0;
+    gSSTCheckCount = 0;
+    stopwatch.start();
+    [[maybe_unused]] std::vector<std::string> hierarchicalMatches =
+        multiColumnQueryHierarchical(queryTrees, currentExpectedValues, "", "",
+                                     dbManager);
+    stopwatch.stop();
+    result.hierarchicalMultiTime = stopwatch.elapsedMicros();
+    result.multiCol_bloomChecks = gBloomCheckCount.load();
+    result.multiCol_leafBloomChecks = gLeafBloomCheckCount.load();
+    result.multiCol_sstChecks = gSSTCheckCount.load();
+
+    // --- Hierarchical Single Column Query ---
+    gBloomCheckCount = 0;
+    gLeafBloomCheckCount = 0;
+    gSSTCheckCount = 0;
+    stopwatch.start();
+    [[maybe_unused]] std::vector<std::string> singlehierarchyMatches =
+        dbManager.findUsingSingleHierarchy(queryTrees[0], columns,
+                                           currentExpectedValues);
+    stopwatch.stop();
+    result.hierarchicalSingleTime = stopwatch.elapsedMicros();
+    result.singleCol_bloomChecks = gBloomCheckCount.load();
+    result.singleCol_leafBloomChecks = gLeafBloomCheckCount.load();
+    result.singleCol_sstChecks = gSSTCheckCount.load();
+
+    results.push_back(result);
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+
+  return results;
+}
+
+std::vector<AccumulatedQueryMetrics> runComprehensiveQueryAnalysis(
+    DBManager& dbManager, const std::map<std::string, BloomTree>& hierarchies,
+    const std::vector<std::string>& columns, size_t dbSize, int numQueriesPerScenario) {
+  
+  std::vector<AccumulatedQueryMetrics> accumulatedResults;
+  
+  // Define the real data percentages to test
+  std::vector<double> realDataPercentages = {0.0, 20.0, 33.0, 50.0, 75.0, 100.0};
+  
+  spdlog::info("runComprehensiveQueryAnalysis: Starting comprehensive analysis with {} queries per scenario", 
+               numQueriesPerScenario);
+  
+  for (double percentage : realDataPercentages) {
+    spdlog::info("Running scenario with {}% real data", percentage);
+    
+    // Run mixed queries for this percentage
+    std::vector<MixedQueryResult> results = runMixedQueriesWithCsvData(
+        dbManager, hierarchies, columns, dbSize, numQueriesPerScenario, percentage);
+    
+    if (results.empty()) {
+      spdlog::warn("No results returned for {}% real data scenario", percentage);
+      continue;
+    }
+    
+    // Accumulate metrics
+    AccumulatedQueryMetrics metrics;
+    metrics.realDataPercentage = percentage;
+    metrics.totalQueries = results.size();
+    metrics.realQueries = 0;
+    metrics.falseQueries = 0;
+    
+    // Initialize sums for averaging
+    long long totalMultiTime = 0, totalSingleTime = 0;
+    long long realMultiTimeSum = 0, realSingleTimeSum = 0;
+    long long falseMultiTimeSum = 0, falseSingleTimeSum = 0;
+    
+    size_t totalMultiBloomChecks = 0, totalMultiLeafBloomChecks = 0, totalMultiSSTChecks = 0;
+    size_t totalSingleBloomChecks = 0, totalSingleLeafBloomChecks = 0, totalSingleSSTChecks = 0;
+    
+    size_t realMultiBloomChecksSum = 0, realMultiSSTChecksSum = 0;
+    size_t falseMultiBloomChecksSum = 0, falseMultiSSTChecksSum = 0;
+    
+    // Process each query result
+    for (const auto& result : results) {
+      totalMultiTime += result.hierarchicalMultiTime;
+      totalSingleTime += result.hierarchicalSingleTime;
+      
+      totalMultiBloomChecks += result.multiCol_bloomChecks;
+      totalMultiLeafBloomChecks += result.multiCol_leafBloomChecks;
+      totalMultiSSTChecks += result.multiCol_sstChecks;
+      totalSingleBloomChecks += result.singleCol_bloomChecks;
+      totalSingleLeafBloomChecks += result.singleCol_leafBloomChecks;
+      totalSingleSSTChecks += result.singleCol_sstChecks;
+      
+      if (result.isRealData) {
+        metrics.realQueries++;
+        realMultiTimeSum += result.hierarchicalMultiTime;
+        realSingleTimeSum += result.hierarchicalSingleTime;
+        realMultiBloomChecksSum += result.multiCol_bloomChecks;
+        realMultiSSTChecksSum += result.multiCol_sstChecks;
+      } else {
+        metrics.falseQueries++;
+        falseMultiTimeSum += result.hierarchicalMultiTime;
+        falseSingleTimeSum += result.hierarchicalSingleTime;
+        falseMultiBloomChecksSum += result.multiCol_bloomChecks;
+        falseMultiSSTChecksSum += result.multiCol_sstChecks;
+      }
+    }
+    
+    // Calculate averages
+    metrics.avgHierarchicalMultiTime = static_cast<double>(totalMultiTime) / metrics.totalQueries;
+    metrics.avgHierarchicalSingleTime = static_cast<double>(totalSingleTime) / metrics.totalQueries;
+    
+    metrics.avgMultiBloomChecks = static_cast<double>(totalMultiBloomChecks) / metrics.totalQueries;
+    metrics.avgMultiLeafBloomChecks = static_cast<double>(totalMultiLeafBloomChecks) / metrics.totalQueries;
+    metrics.avgMultiSSTChecks = static_cast<double>(totalMultiSSTChecks) / metrics.totalQueries;
+    metrics.avgSingleBloomChecks = static_cast<double>(totalSingleBloomChecks) / metrics.totalQueries;
+    metrics.avgSingleLeafBloomChecks = static_cast<double>(totalSingleLeafBloomChecks) / metrics.totalQueries;
+    metrics.avgSingleSSTChecks = static_cast<double>(totalSingleSSTChecks) / metrics.totalQueries;
+    
+    // Calculate separate averages for real vs false data
+    if (metrics.realQueries > 0) {
+      metrics.avgRealDataMultiTime = static_cast<double>(realMultiTimeSum) / metrics.realQueries;
+      metrics.avgRealDataSingleTime = static_cast<double>(realSingleTimeSum) / metrics.realQueries;
+      metrics.avgRealMultiBloomChecks = static_cast<double>(realMultiBloomChecksSum) / metrics.realQueries;
+      metrics.avgRealMultiSSTChecks = static_cast<double>(realMultiSSTChecksSum) / metrics.realQueries;
+    } else {
+      metrics.avgRealDataMultiTime = 0.0;
+      metrics.avgRealDataSingleTime = 0.0;
+      metrics.avgRealMultiBloomChecks = 0.0;
+      metrics.avgRealMultiSSTChecks = 0.0;
+    }
+    
+    if (metrics.falseQueries > 0) {
+      metrics.avgFalseDataMultiTime = static_cast<double>(falseMultiTimeSum) / metrics.falseQueries;
+      metrics.avgFalseDataSingleTime = static_cast<double>(falseSingleTimeSum) / metrics.falseQueries;
+      metrics.avgFalseMultiBloomChecks = static_cast<double>(falseMultiBloomChecksSum) / metrics.falseQueries;
+      metrics.avgFalseMultiSSTChecks = static_cast<double>(falseMultiSSTChecksSum) / metrics.falseQueries;
+    } else {
+      metrics.avgFalseDataMultiTime = 0.0;
+      metrics.avgFalseDataSingleTime = 0.0;
+      metrics.avgFalseMultiBloomChecks = 0.0;
+      metrics.avgFalseMultiSSTChecks = 0.0;
+    }
+    
+    accumulatedResults.push_back(metrics);
+    
+    spdlog::info("Scenario {}% complete: {} real queries (avg: {:.2f}μs), {} false queries (avg: {:.2f}μs)",
+                 percentage, metrics.realQueries, metrics.avgRealDataMultiTime, 
+                 metrics.falseQueries, metrics.avgFalseDataMultiTime);
+  }
+  
+  spdlog::info("Comprehensive analysis completed with {} scenarios", accumulatedResults.size());
+  return accumulatedResults;
+}

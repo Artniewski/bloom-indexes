@@ -109,8 +109,28 @@ void runExp1(std::string baseDir, bool initMode, std::string sharedDbName,
             << bloomCreationTime << "\n";
     outExp3.close();
 
+    // Run standard queries first
     AggregatedQueryTimings timings = runStandardQueries(
         dbManager, hierarchies, columns, dbSize, 10, skipDbScan);
+
+    // Then run pattern-based queries
+    spdlog::info("ExpBloomMetrics: Running pattern-based queries for {} columns", columns.size());
+    std::vector<PatternQueryResult> results = runPatternQueriesWithCsvData(
+        dbManager, hierarchies, columns, dbSize);
+    
+    spdlog::info("ExpBloomMetrics: Generated {} pattern results for {} columns", 
+                 results.size(), columns.size());
+
+    // Run comprehensive analysis across different real data percentages
+    const int numQueriesPerScenario = 100;  // Number of queries per percentage scenario
+    
+    spdlog::info("ExpBloomMetrics: Running comprehensive analysis for {} columns with {} queries per scenario", 
+                 columns.size(), numQueriesPerScenario);
+    std::vector<AccumulatedQueryMetrics> comprehensiveResults = runComprehensiveQueryAnalysis(
+        dbManager, hierarchies, columns, dbSize, numQueriesPerScenario);
+    
+    spdlog::info("ExpBloomMetrics: Generated {} comprehensive analysis results for {} columns", 
+                 comprehensiveResults.size(), columns.size());
 
     std::ofstream outExp4("csv/exp_4_query_timings.csv", std::ios::app);
     if (!outExp4) {
@@ -124,6 +144,70 @@ void runExp1(std::string baseDir, bool initMode, std::string sharedDbName,
         << timings.hierarchicalMultiTimeStats.average << ","
         << timings.hierarchicalSingleTimeStats.average << "\n";
     outExp4.close();
+
+    // Write pattern-based query results to separate CSV
+    std::ofstream pattern_csv("csv/exp_1_false_query.csv", std::ios::app);
+    if (!pattern_csv) {
+      spdlog::error(
+          "ExpBloomMetrics: Nie udało się otworzyć pliku pattern CSV!");
+      return;
+    }
+    
+    if (dbSize == dbSizes[0]) {
+      pattern_csv << "NumRecords,NumColumns,PercentageExisting,HierarchicalSingleTime,"
+                     "HierarchicalMultiTime,"
+                  << "MultiBloomChecks,MultiLeafBloomChecks,MultiSSTChecks,"
+                  << "SingleBloomChecks,SingleLeafBloomChecks,SingleSSTChecks\n";
+    }
+    
+    for (const auto& result : results) {
+      pattern_csv << dbSize << "," << columns.size() << ","
+                  << result.percent << ","
+                  << result.hierarchicalSingleTime << ","
+                  << result.hierarchicalMultiTime << ","
+                  << result.multiCol_bloomChecks << ","
+                  << result.multiCol_leafBloomChecks << ","
+                  << result.multiCol_sstChecks << ","
+                  << result.singleCol_bloomChecks << ","
+                  << result.singleCol_leafBloomChecks << ","
+                  << result.singleCol_sstChecks << "\n";
+    }
+    pattern_csv.close();
+
+    // Write comprehensive analysis results to separate CSV
+    std::ofstream comprehensive_csv("csv/exp_1_comprehensive_analysis.csv", std::ios::app);
+    if (!comprehensive_csv) {
+      spdlog::error(
+          "ExpBloomMetrics: Nie udało się otworzyć pliku comprehensive analysis CSV!");
+      return;
+    }
+    
+    // Write header if file is empty (first iteration)
+    if (dbSize == dbSizes[0]) {
+      comprehensive_csv << "NumRecords,RealDataPercentage,TotalQueries,RealQueries,FalseQueries,"
+                           "AvgHierarchicalMultiTime,AvgHierarchicalSingleTime,"
+                           "AvgRealDataMultiTime,AvgRealDataSingleTime,AvgFalseDataMultiTime,AvgFalseDataSingleTime,"
+                        << "AvgMultiBloomChecks,AvgMultiLeafBloomChecks,AvgMultiSSTChecks,"
+                        << "AvgSingleBloomChecks,AvgSingleLeafBloomChecks,AvgSingleSSTChecks,"
+                        << "AvgRealMultiBloomChecks,AvgRealMultiSSTChecks,AvgFalseMultiBloomChecks,AvgFalseMultiSSTChecks\n";
+    }
+    
+    // Write each comprehensive analysis result as a separate row
+    for (const auto& result : comprehensiveResults) {
+      comprehensive_csv << dbSize << ","
+                        << result.realDataPercentage << "," << result.totalQueries << ","
+                        << result.realQueries << "," << result.falseQueries << ","
+                        << result.avgHierarchicalMultiTime << "," << result.avgHierarchicalSingleTime << ","
+                        << result.avgRealDataMultiTime << "," << result.avgRealDataSingleTime << ","
+                        << result.avgFalseDataMultiTime << "," << result.avgFalseDataSingleTime << ","
+                        << result.avgMultiBloomChecks << "," << result.avgMultiLeafBloomChecks << ","
+                        << result.avgMultiSSTChecks << "," << result.avgSingleBloomChecks << ","
+                        << result.avgSingleLeafBloomChecks << "," << result.avgSingleSSTChecks << ","
+                        << result.avgRealMultiBloomChecks << "," << result.avgRealMultiSSTChecks << ","
+                        << result.avgFalseMultiBloomChecks << "," << result.avgFalseMultiSSTChecks << "\n";
+    }
+    comprehensive_csv.close();
+
     dbManager.closeDB();
   }
 }

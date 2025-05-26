@@ -94,8 +94,17 @@ void runExp6(const std::string& dbPath, size_t dbSize, bool skipDbScan) {
 
     hierarchies = buildHierarchies(columnSstFiles, bloomManager, params);
 
+    // Run standard queries first
     AggregatedQueryTimings timings = runStandardQueries(
         dbManager, hierarchies, columns, dbSize, numQueryRuns, skipDbScan);
+
+    // Then run pattern-based queries
+    spdlog::info("Exp6: Running pattern-based queries for {} columns", columns.size());
+    std::vector<PatternQueryResult> results = runPatternQueriesWithCsvData(
+        dbManager, hierarchies, columns, dbSize);
+    
+    spdlog::info("Exp6: Generated {} pattern results for {} columns", 
+                 results.size(), columns.size());
 
     double falsePositiveProb = getProbabilityOfFalsePositive(
         params.bloomSize, params.numHashFunctions, params.itemsPerPartition);
@@ -170,6 +179,37 @@ void runExp6(const std::string& dbPath, size_t dbSize, bool skipDbScan) {
                                 << timings.singleCol_bloomChecksStats.average << ","
                                 << timings.singleCol_leafBloomChecksStats.average << ","
                                 << timings.singleCol_sstChecksStats.average << "\n";
+
+    // Write pattern-based query results to separate CSV
+    std::ofstream pattern_csv("csv/exp_6_false_query.csv", std::ios::app);
+    if (!pattern_csv) {
+      spdlog::error(
+          "Exp6: Nie udało się otworzyć pliku pattern CSV!");
+      return;
+    }
+    
+    // Write header if file is empty (first iteration)
+    if (bloomSize == bloomSizes[0]) {
+      pattern_csv << "NumRecords,BloomSize,PercentageExisting,HierarchicalSingleTime,"
+                     "HierarchicalMultiTime,"
+                  << "MultiBloomChecks,MultiLeafBloomChecks,MultiSSTChecks,"
+                  << "SingleBloomChecks,SingleLeafBloomChecks,SingleSSTChecks\n";
+    }
+    
+    // Write each pattern result as a separate row
+    for (const auto& result : results) {
+      pattern_csv << dbSize << "," << bloomSize << ","
+                  << result.percent << ","
+                  << result.hierarchicalSingleTime << ","
+                  << result.hierarchicalMultiTime << ","
+                  << result.multiCol_bloomChecks << ","
+                  << result.multiCol_leafBloomChecks << ","
+                  << result.multiCol_sstChecks << ","
+                  << result.singleCol_bloomChecks << ","
+                  << result.singleCol_leafBloomChecks << ","
+                  << result.singleCol_sstChecks << "\n";
+    }
+    pattern_csv.close();
 
     checks_csv_out.close();
     timings_csv_out.close();
