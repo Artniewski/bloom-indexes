@@ -96,7 +96,7 @@ void runExp1(std::string baseDir, bool initMode, std::string sharedDbName,
     std::string dbName = (dbSize == defaultNumRecords)
                              ? sharedDbName
                              : baseDir + "/exp1_db_" + std::to_string(dbSize);
-    TestParams params = {dbName, dbSize, 3, 1, 100000, 1'000'000, 6};
+    TestParams params = {dbName, dbSize, 3, 1, 100000, 4'000'000, 3};
     spdlog::info("ExpBloomMetrics: Rozpoczynam eksperyment dla bazy '{}'",
                  params.dbName);
     clearBloomFilterFiles(params.dbName);

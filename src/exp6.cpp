@@ -71,8 +71,8 @@ void writeExp6TimingComparisonHeaders() {
 
 void runExp6(const std::string& dbPath, size_t dbSize, bool skipDbScan) {
   const std::vector<std::string> columns = {"phone", "mail", "address"};
-  const std::vector<size_t> bloomSizes = {500000, 1000000, 2000000};
-  const int numQueryRuns = 10;
+  const std::vector<size_t> bloomSizes = {2000000, 4000000, 8000000};
+  const int numQueryRuns = 100;
 
   // Initialize CSV headers
   writeExp6BasicTimingsHeaders();
@@ -88,7 +88,7 @@ void runExp6(const std::string& dbPath, size_t dbSize, bool skipDbScan) {
 
   for (const auto& bloomSize : bloomSizes) {
     TestParams params = {
-        dbPath, static_cast<int>(dbSize), 3, 1, 100000, bloomSize, 6};
+        dbPath, static_cast<int>(dbSize), 3, 1, 100000, bloomSize, 3};
     spdlog::info(
         "Exp6: Running experiment for database '{}', bloom size: {} bits",
         params.dbName, bloomSize);

@@ -80,9 +80,9 @@ int main(int argc, char* argv[]) {
     // EXP 3 included in exp1 first run (creating DB)
     // EXP 4 included in exp1 first run (running queries)
     runExp5(sharedDbName, defaultNumRecords, skipDbScan);
-    // runExp6(sharedDbName, defaultNumRecords, skipDbScan);
-    // runExp7(sharedDbName, defaultNumRecords, skipDbScan);
-    // runExp8(baseDir, initMode, skipDbScan);
+    runExp6(sharedDbName, defaultNumRecords, skipDbScan);
+    runExp7(sharedDbName, defaultNumRecords, skipDbScan);
+    runExp8(baseDir, initMode, skipDbScan);
   } catch (const std::exception& e) {
     spdlog::error("[Error] {}", e.what());
     return EXIT_FAILURE;

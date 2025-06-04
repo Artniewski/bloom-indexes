@@ -98,8 +98,8 @@ void runExp7(const std::string& dbPathToUse, size_t dbSizeToUse,
       3,        // bloomTreeRatio - default or from a config
       1,        // numberOfAttempts - default or from a config
       100000,   // itemsPerPartition - default or from a config
-      1000000,  // bloomSize - default or from a config
-      6         // numHashFunctions - default or from a config
+      4000000,  // bloomSize - default or from a config
+      3         // numHashFunctions - default or from a config
   };
   DBManager dbManager;
   BloomManager bloomManager;

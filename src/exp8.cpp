@@ -70,9 +70,9 @@ void writeExp8TimingComparisonHeaders() {
 }
 
 void runExp8(std::string baseDir, bool initMode, bool skipDbScan) {
-  const int dbSize = 50'000'000;
+  const int dbSize = 20'000'000;
   const int maxColumns = 12;
-  const std::vector<int> numColumnsToTest = {4,8,10,maxColumns};
+  const std::vector<int> numColumnsToTest = {2,4,6,8,10,maxColumns};
   
   const std::string fixedDbName = baseDir + "/exp8_shared_db";
   const int numQueriesPerScenario = 100;
@@ -132,7 +132,7 @@ void runExp8(std::string baseDir, bool initMode, bool skipDbScan) {
       spdlog::info("Using Column: {}", column);
     }
 
-    TestParams params = {fixedDbName, dbSize, 3, 1, 100000, 1'000'000, 6};
+    TestParams params = {fixedDbName, dbSize, 3, 1, 100000, 4'000'000, 3};
     spdlog::info(
         "ExpBloomMetrics: Running experiment for database '{}' using {}/{} "
         "columns",

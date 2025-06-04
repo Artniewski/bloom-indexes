@@ -71,9 +71,9 @@ void writeExp5TimingComparisonHeaders() {
 
 void runExp5(const std::string& dbPath, size_t dbSizeParam, bool skipDbScan) {
   const std::vector<std::string> columns = {"phone", "mail", "address"};
-  const size_t bloomFilterSize = 1'000'000;
-  const std::vector<size_t> itemsPerPartitionVec = {50000, 75000, 100000};
-  const int numQueryRuns = 10;
+  const size_t bloomFilterSize = 4'000'000;
+  const std::vector<size_t> itemsPerPartitionVec = {100000, 150000, 200000};
+  const int numQueryRuns = 100;
 
   // Initialize CSV headers
   writeExp5BasicTimingsHeaders();
@@ -88,8 +88,8 @@ void runExp5(const std::string& dbPath, size_t dbSizeParam, bool skipDbScan) {
   BloomManager bloomManager;
 
   for (const auto& currentItemsPerPartition : itemsPerPartitionVec) {
-    TestParams params = {dbPath, static_cast<int>(dbSizeParam), 5,
-                         1, currentItemsPerPartition, bloomFilterSize, 6};
+    TestParams params = {dbPath, static_cast<int>(dbSizeParam), 3,
+                         1, currentItemsPerPartition, bloomFilterSize, 3};
     spdlog::info("Exp5: Running for DB: '{}', itemsPerPartition: {}",
                  params.dbName, currentItemsPerPartition);
 
