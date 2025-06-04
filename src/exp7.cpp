@@ -59,11 +59,7 @@ void writeExp7PerColumnCSVHeaders() {
       "multiCol_bloomChecksPerColumn_avg,multiCol_bloomChecksPerColumn_min,multiCol_bloomChecksPerColumn_max,"
       "multiCol_leafBloomChecksPerColumn_avg,multiCol_leafBloomChecksPerColumn_min,multiCol_leafBloomChecksPerColumn_max,"
       "multiCol_nonLeafBloomChecksPerColumn_avg,multiCol_nonLeafBloomChecksPerColumn_min,multiCol_nonLeafBloomChecksPerColumn_max,"
-      "multiCol_sstChecksPerColumn_avg,multiCol_sstChecksPerColumn_min,multiCol_sstChecksPerColumn_max,"
-      "singleCol_bloomChecksPerColumn_avg,singleCol_bloomChecksPerColumn_min,singleCol_bloomChecksPerColumn_max,"
-      "singleCol_leafBloomChecksPerColumn_avg,singleCol_leafBloomChecksPerColumn_min,singleCol_leafBloomChecksPerColumn_max,"
-      "singleCol_nonLeafBloomChecksPerColumn_avg,singleCol_nonLeafBloomChecksPerColumn_min,singleCol_nonLeafBloomChecksPerColumn_max,"
-      "singleCol_sstChecksPerColumn_avg,singleCol_sstChecksPerColumn_min,singleCol_sstChecksPerColumn_max");
+      "multiCol_sstChecksPerColumn_avg,multiCol_sstChecksPerColumn_min,multiCol_sstChecksPerColumn_max");
 }
 
 void writeExp7TimingsCSVHeaders() {
@@ -268,19 +264,7 @@ void runExp7(const std::string& dbPathToUse, size_t dbSizeToUse,
                        << timings.multiCol_nonLeafBloomChecksPerColumnStats.max << ","
                        << timings.multiCol_sstChecksPerColumnStats.average << ","
                        << timings.multiCol_sstChecksPerColumnStats.min << ","
-                       << timings.multiCol_sstChecksPerColumnStats.max << ","
-                       << timings.singleCol_bloomChecksPerColumnStats.average << ","
-                       << timings.singleCol_bloomChecksPerColumnStats.min << ","
-                       << timings.singleCol_bloomChecksPerColumnStats.max << ","
-                       << timings.singleCol_leafBloomChecksPerColumnStats.average << ","
-                       << timings.singleCol_leafBloomChecksPerColumnStats.min << ","
-                       << timings.singleCol_leafBloomChecksPerColumnStats.max << ","
-                       << timings.singleCol_nonLeafBloomChecksPerColumnStats.average << ","
-                       << timings.singleCol_nonLeafBloomChecksPerColumnStats.min << ","
-                       << timings.singleCol_nonLeafBloomChecksPerColumnStats.max << ","
-                       << timings.singleCol_sstChecksPerColumnStats.average << ","
-                       << timings.singleCol_sstChecksPerColumnStats.min << ","
-                       << timings.singleCol_sstChecksPerColumnStats.max << "\n";
+                       << timings.multiCol_sstChecksPerColumnStats.max << "\n";
 
     timings_csv_out << params.numRecords << "," << numTargetRecords << ","
                     << timings.hierarchicalSingleTimeStats.average << ","

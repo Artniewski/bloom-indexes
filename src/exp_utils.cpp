@@ -331,10 +331,10 @@ AggregatedQueryTimings runStandardQueries(
     multiCol_sstChecksPerColumn_vec.push_back(static_cast<double>(multiCol_sstChecks_vec[i]) / numCols);
     multiCol_nonLeafBloomChecksPerColumn_vec.push_back(static_cast<double>(multiCol_nonLeafBloomChecks_vec[i]) / numCols);
 
-    singleCol_bloomChecksPerColumn_vec.push_back(static_cast<double>(singleCol_bloomChecks_vec[i]) / numCols);
-    singleCol_leafBloomChecksPerColumn_vec.push_back(static_cast<double>(singleCol_leafBloomChecks_vec[i]) / numCols);
-    singleCol_sstChecksPerColumn_vec.push_back(static_cast<double>(singleCol_sstChecks_vec[i]) / numCols);
-    singleCol_nonLeafBloomChecksPerColumn_vec.push_back(static_cast<double>(singleCol_nonLeafBloomChecks_vec[i]) / numCols);
+    singleCol_bloomChecksPerColumn_vec.push_back(static_cast<double>(singleCol_bloomChecks_vec[i]) );
+    singleCol_leafBloomChecksPerColumn_vec.push_back(static_cast<double>(singleCol_leafBloomChecks_vec[i]) );
+    singleCol_sstChecksPerColumn_vec.push_back(static_cast<double>(singleCol_sstChecks_vec[i]) );
+    singleCol_nonLeafBloomChecksPerColumn_vec.push_back(static_cast<double>(singleCol_nonLeafBloomChecks_vec[i]) );
   }
 
   aggregated_timings.multiCol_bloomChecksPerColumnStats = 
@@ -501,10 +501,10 @@ AggregatedQueryTimings runStandardQueriesWithTarget(
     multiCol_sstChecksPerColumn_vec.push_back(static_cast<double>(multiCol_sstChecks_vec[i]) / numCols);
     multiCol_nonLeafBloomChecksPerColumn_vec.push_back(static_cast<double>(multiCol_nonLeafBloomChecks_vec[i]) / numCols);
 
-    singleCol_bloomChecksPerColumn_vec.push_back(static_cast<double>(singleCol_bloomChecks_vec[i]) / numCols);
-    singleCol_leafBloomChecksPerColumn_vec.push_back(static_cast<double>(singleCol_leafBloomChecks_vec[i]) / numCols);
-    singleCol_sstChecksPerColumn_vec.push_back(static_cast<double>(singleCol_sstChecks_vec[i]) / numCols);
-    singleCol_nonLeafBloomChecksPerColumn_vec.push_back(static_cast<double>(singleCol_nonLeafBloomChecks_vec[i]) / numCols);
+    singleCol_bloomChecksPerColumn_vec.push_back(static_cast<double>(singleCol_bloomChecks_vec[i]) );
+    singleCol_leafBloomChecksPerColumn_vec.push_back(static_cast<double>(singleCol_leafBloomChecks_vec[i]) );
+    singleCol_sstChecksPerColumn_vec.push_back(static_cast<double>(singleCol_sstChecks_vec[i]) );
+    singleCol_nonLeafBloomChecksPerColumn_vec.push_back(static_cast<double>(singleCol_nonLeafBloomChecks_vec[i]) );
   }
 
   aggregated_timings.multiCol_bloomChecksPerColumnStats = 
@@ -720,10 +720,10 @@ std::vector<PatternQueryResult> runPatternQueriesWithCsvData(
     result.singleCol_nonLeafBloomChecks = result.singleCol_bloomChecks - result.singleCol_leafBloomChecks;
     
     // Calculate per-column averages
-    result.singleCol_bloomChecksPerColumn = static_cast<double>(result.singleCol_bloomChecks) / numCols;
-    result.singleCol_leafBloomChecksPerColumn = static_cast<double>(result.singleCol_leafBloomChecks) / numCols;
-    result.singleCol_sstChecksPerColumn = static_cast<double>(result.singleCol_sstChecks) / numCols;
-    result.singleCol_nonLeafBloomChecksPerColumn = static_cast<double>(result.singleCol_nonLeafBloomChecks) / numCols;
+    result.singleCol_bloomChecksPerColumn = static_cast<double>(result.singleCol_bloomChecks) ;
+    result.singleCol_leafBloomChecksPerColumn = static_cast<double>(result.singleCol_leafBloomChecks) ;
+    result.singleCol_sstChecksPerColumn = static_cast<double>(result.singleCol_sstChecks) ;
+    result.singleCol_nonLeafBloomChecksPerColumn = static_cast<double>(result.singleCol_nonLeafBloomChecks) ;
 
     results.push_back(result);
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -890,10 +890,10 @@ std::vector<MixedQueryResult> runMixedQueriesWithCsvData(
     result.singleCol_nonLeafBloomChecks = result.singleCol_bloomChecks - result.singleCol_leafBloomChecks;
     
     // Calculate per-column averages
-    result.singleCol_bloomChecksPerColumn = static_cast<double>(result.singleCol_bloomChecks) / numCols;
-    result.singleCol_leafBloomChecksPerColumn = static_cast<double>(result.singleCol_leafBloomChecks) / numCols;
-    result.singleCol_sstChecksPerColumn = static_cast<double>(result.singleCol_sstChecks) / numCols;
-    result.singleCol_nonLeafBloomChecksPerColumn = static_cast<double>(result.singleCol_nonLeafBloomChecks) / numCols;
+    result.singleCol_bloomChecksPerColumn = static_cast<double>(result.singleCol_bloomChecks) ;
+    result.singleCol_leafBloomChecksPerColumn = static_cast<double>(result.singleCol_leafBloomChecks) ;
+    result.singleCol_sstChecksPerColumn = static_cast<double>(result.singleCol_sstChecks) ;
+    result.singleCol_nonLeafBloomChecksPerColumn = static_cast<double>(result.singleCol_nonLeafBloomChecks) ;
 
     results.push_back(result);
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
@@ -994,10 +994,10 @@ std::vector<AccumulatedQueryMetrics> runComprehensiveQueryAnalysis(
     metrics.avgMultiLeafBloomChecksPerColumn = metrics.avgMultiLeafBloomChecks / numCols;
     metrics.avgMultiSSTChecksPerColumn = metrics.avgMultiSSTChecks / numCols;
     metrics.avgMultiNonLeafBloomChecksPerColumn = metrics.avgMultiNonLeafBloomChecks / numCols;
-    metrics.avgSingleBloomChecksPerColumn = metrics.avgSingleBloomChecks / numCols;
-    metrics.avgSingleLeafBloomChecksPerColumn = metrics.avgSingleLeafBloomChecks / numCols;
-    metrics.avgSingleSSTChecksPerColumn = metrics.avgSingleSSTChecks / numCols;
-    metrics.avgSingleNonLeafBloomChecksPerColumn = metrics.avgSingleNonLeafBloomChecks / numCols;
+    metrics.avgSingleBloomChecksPerColumn = metrics.avgSingleBloomChecks ;
+    metrics.avgSingleLeafBloomChecksPerColumn = metrics.avgSingleLeafBloomChecks ;
+    metrics.avgSingleSSTChecksPerColumn = metrics.avgSingleSSTChecks ;
+    metrics.avgSingleNonLeafBloomChecksPerColumn = metrics.avgSingleNonLeafBloomChecks ;
     
     // Calculate separate averages for real vs false data
     if (metrics.realQueries > 0) {
