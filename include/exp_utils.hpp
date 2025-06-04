@@ -36,6 +36,20 @@ struct PatternQueryResult {
   size_t singleCol_bloomChecks;
   size_t singleCol_leafBloomChecks;
   size_t singleCol_sstChecks;
+  
+  // Derived metrics: bloom checks minus leaf checks
+  size_t multiCol_nonLeafBloomChecks;
+  size_t singleCol_nonLeafBloomChecks;
+  
+  // Per-column averages (total counts divided by column count)
+  double multiCol_bloomChecksPerColumn;
+  double multiCol_leafBloomChecksPerColumn;
+  double multiCol_sstChecksPerColumn;
+  double multiCol_nonLeafBloomChecksPerColumn;
+  double singleCol_bloomChecksPerColumn;
+  double singleCol_leafBloomChecksPerColumn;
+  double singleCol_sstChecksPerColumn;
+  double singleCol_nonLeafBloomChecksPerColumn;
 };
 
 struct MixedQueryResult {
@@ -49,6 +63,20 @@ struct MixedQueryResult {
   size_t singleCol_bloomChecks;
   size_t singleCol_leafBloomChecks;
   size_t singleCol_sstChecks;
+  
+  // Derived metrics: bloom checks minus leaf checks
+  size_t multiCol_nonLeafBloomChecks;
+  size_t singleCol_nonLeafBloomChecks;
+  
+  // Per-column averages (total counts divided by column count)
+  double multiCol_bloomChecksPerColumn;
+  double multiCol_leafBloomChecksPerColumn;
+  double multiCol_sstChecksPerColumn;
+  double multiCol_nonLeafBloomChecksPerColumn;
+  double singleCol_bloomChecksPerColumn;
+  double singleCol_leafBloomChecksPerColumn;
+  double singleCol_sstChecksPerColumn;
+  double singleCol_nonLeafBloomChecksPerColumn;
 };
 
 struct AccumulatedQueryMetrics {
@@ -56,6 +84,7 @@ struct AccumulatedQueryMetrics {
   int totalQueries;
   int realQueries;
   int falseQueries;
+  size_t numColumns;  // Number of columns for reference
   
   // Average timing metrics
   double avgHierarchicalMultiTime;
@@ -73,11 +102,31 @@ struct AccumulatedQueryMetrics {
   double avgSingleLeafBloomChecks;
   double avgSingleSSTChecks;
   
+  // Derived average check metrics
+  double avgMultiNonLeafBloomChecks;
+  double avgSingleNonLeafBloomChecks;
+  
+  // Per-column averages (dividing total by column count)
+  double avgMultiBloomChecksPerColumn;
+  double avgMultiLeafBloomChecksPerColumn;
+  double avgMultiSSTChecksPerColumn;
+  double avgMultiNonLeafBloomChecksPerColumn;
+  double avgSingleBloomChecksPerColumn;
+  double avgSingleLeafBloomChecksPerColumn;
+  double avgSingleSSTChecksPerColumn;
+  double avgSingleNonLeafBloomChecksPerColumn;
+  
   // Separate averages for real vs false data
   double avgRealMultiBloomChecks;
   double avgRealMultiSSTChecks;
   double avgFalseMultiBloomChecks;
   double avgFalseMultiSSTChecks;
+  
+  // Per-column averages for real vs false data
+  double avgRealMultiBloomChecksPerColumn;
+  double avgRealMultiSSTChecksPerColumn;
+  double avgFalseMultiBloomChecksPerColumn;
+  double avgFalseMultiSSTChecksPerColumn;
 };
 
 struct AggregatedQueryTimings {
@@ -92,6 +141,22 @@ struct AggregatedQueryTimings {
   CountStatistics singleCol_bloomChecksStats;
   CountStatistics singleCol_leafBloomChecksStats;
   CountStatistics singleCol_sstChecksStats;
+  
+  // Derived statistics: bloom checks minus leaf checks
+  CountStatistics multiCol_nonLeafBloomChecksStats;
+  CountStatistics singleCol_nonLeafBloomChecksStats;
+  
+  // Per-column statistics (dividing by column count)
+  TimingStatistics multiCol_bloomChecksPerColumnStats;
+  TimingStatistics multiCol_leafBloomChecksPerColumnStats;
+  TimingStatistics multiCol_sstChecksPerColumnStats;
+  TimingStatistics multiCol_nonLeafBloomChecksPerColumnStats;
+  TimingStatistics singleCol_bloomChecksPerColumnStats;
+  TimingStatistics singleCol_leafBloomChecksPerColumnStats;
+  TimingStatistics singleCol_sstChecksPerColumnStats;
+  TimingStatistics singleCol_nonLeafBloomChecksPerColumnStats;
+  
+  size_t numColumns;  // Number of columns for reference
 };
 
 std::map<std::string, std::vector<std::string>> scanSstFilesAsync(

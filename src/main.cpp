@@ -71,7 +71,7 @@ int main(int argc, char* argv[]) {
 
   const std::string sharedDbName = baseDir + "/shared_exp_db";
   const std::vector<std::string> defaultColumns = {"phone", "mail", "address"};
-  const int defaultNumRecords = 50000000;
+  const int defaultNumRecords = 20000000;
 
   try {
     // run section
@@ -79,7 +79,7 @@ int main(int argc, char* argv[]) {
     // EXP 2 included in exp5 run
     // EXP 3 included in exp1 first run (creating DB)
     // EXP 4 included in exp1 first run (running queries)
-    // runExp5(sharedDbName, defaultNumRecords, skipDbScan);
+    runExp5(sharedDbName, defaultNumRecords, skipDbScan);
     // runExp6(sharedDbName, defaultNumRecords, skipDbScan);
     // runExp7(sharedDbName, defaultNumRecords, skipDbScan);
     runExp8(baseDir, initMode, skipDbScan);

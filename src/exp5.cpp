@@ -27,18 +27,34 @@ void writeExp5ChecksCSVHeaders() {
   writeCsvHeader(
       "csv/exp_5_checks.csv",
       "numRecords,itemsPerPartition,"
-      "multiCol_bloomChecks_avg,multiCol_bloomChecks_min,"
-      "multiCol_bloomChecks_max,"
-      "multiCol_leafBloomChecks_avg,multiCol_leafBloomChecks_min,"
-      "multiCol_leafBloomChecks_max,"
-      "multiCol_sstChecks_avg,multiCol_sstChecks_min,multiCol_"
-      "sstChecks_max,"
-      "singleCol_bloomChecks_avg,singleCol_bloomChecks_min,singleCol_"
-      "bloomChecks_max,"
-      "singleCol_leafBlo omChecks_avg,singleCol_leafBloomChecks_min,"
-      "singleCol_leafBloomChecks_max,"
-      "singleCol_sstChecks_avg,singleCol_sstChecks_min,singleCol_"
-      "sstChecks_max");
+      "multiCol_bloomChecks_avg,multiCol_bloomChecks_min,multiCol_bloomChecks_max,"
+      "multiCol_leafBloomChecks_avg,multiCol_leafBloomChecks_min,multiCol_leafBloomChecks_max,"
+      "multiCol_sstChecks_avg,multiCol_sstChecks_min,multiCol_sstChecks_max,"
+      "singleCol_bloomChecks_avg,singleCol_bloomChecks_min,singleCol_bloomChecks_max,"
+      "singleCol_leafBloomChecks_avg,singleCol_leafBloomChecks_min,singleCol_leafBloomChecks_max,"
+      "singleCol_sstChecks_avg,singleCol_sstChecks_min,singleCol_sstChecks_max");
+}
+
+void writeExp5DerivedMetricsCSVHeaders() {
+  writeCsvHeader(
+      "csv/exp_5_derived_metrics.csv",
+      "numRecords,itemsPerPartition,"
+      "multiCol_nonLeafBloomChecks_avg,multiCol_nonLeafBloomChecks_min,multiCol_nonLeafBloomChecks_max,"
+      "singleCol_nonLeafBloomChecks_avg,singleCol_nonLeafBloomChecks_min,singleCol_nonLeafBloomChecks_max");
+}
+
+void writeExp5PerColumnCSVHeaders() {
+  writeCsvHeader(
+      "csv/exp_5_per_column.csv",
+      "numRecords,itemsPerPartition,numColumns,"
+      "multiCol_bloomChecksPerColumn_avg,multiCol_bloomChecksPerColumn_min,multiCol_bloomChecksPerColumn_max,"
+      "multiCol_leafBloomChecksPerColumn_avg,multiCol_leafBloomChecksPerColumn_min,multiCol_leafBloomChecksPerColumn_max,"
+      "multiCol_nonLeafBloomChecksPerColumn_avg,multiCol_nonLeafBloomChecksPerColumn_min,multiCol_nonLeafBloomChecksPerColumn_max,"
+      "multiCol_sstChecksPerColumn_avg,multiCol_sstChecksPerColumn_min,multiCol_sstChecksPerColumn_max,"
+      "singleCol_bloomChecksPerColumn_avg,singleCol_bloomChecksPerColumn_min,singleCol_bloomChecksPerColumn_max,"
+      "singleCol_leafBloomChecksPerColumn_avg,singleCol_leafBloomChecksPerColumn_min,singleCol_leafBloomChecksPerColumn_max,"
+      "singleCol_nonLeafBloomChecksPerColumn_avg,singleCol_nonLeafBloomChecksPerColumn_min,singleCol_nonLeafBloomChecksPerColumn_max,"
+      "singleCol_sstChecksPerColumn_avg,singleCol_sstChecksPerColumn_min,singleCol_sstChecksPerColumn_max");
 }
 
 void writeExp5TimingsCSVHeaders() {
@@ -60,8 +76,8 @@ void writeExp5OverviewCSVHeaders() {
 void writeExp5SelectedAvgChecksCSVHeaders() {
   writeCsvHeader("csv/exp_5_selected_avg_checks.csv",
                  "numRec,itemsPart,"
-                 "mcBloomAvg,mcLeafAvg,mcSSTAvg,"
-                 "scBloomAvg,scLeafAvg,scSSTAvg");
+                 "mcBloomAvg,mcLeafAvg,mcNonLeafAvg,mcSSTAvg,"
+                 "scBloomAvg,scLeafAvg,scNonLeafAvg,scSSTAvg");
 }
 
 void runExp5(const std::string& dbPath, size_t dbSizeParam, bool skipDbScan) {
@@ -74,12 +90,14 @@ void runExp5(const std::string& dbPath, size_t dbSizeParam, bool skipDbScan) {
   BloomManager bloomManager;
 
   writeExp5ChecksCSVHeaders();
+  writeExp5DerivedMetricsCSVHeaders();
+  writeExp5PerColumnCSVHeaders();
   writeExp5TimingsCSVHeaders();
   writeExp5OverviewCSVHeaders();
   writeExp5SelectedAvgChecksCSVHeaders();
 
   for (const auto& currentItemsPerPartition : itemsPerPartitionVec) {
-    TestParams params = {dbPath, static_cast<int>(dbSizeParam), 3,
+    TestParams params = {dbPath, static_cast<int>(dbSizeParam), 5,
                          1,      currentItemsPerPartition,      bloomFilterSize,
                          6};
     spdlog::info("Exp5: Running for DB: '{}', itemsPerPartition: {}",
@@ -147,6 +165,20 @@ void runExp5(const std::string& dbPath, size_t dbSizeParam, bool skipDbScan) {
           "csv/exp_5_checks.csv do dopisywania!");
       return;
     }
+    std::ofstream derived_csv_out("csv/exp_5_derived_metrics.csv", std::ios::app);
+    if (!derived_csv_out) {
+      spdlog::error(
+          "Exp5: Nie udało się otworzyć pliku wynikowego "
+          "csv/exp_5_derived_metrics.csv do dopisywania!");
+      return;
+    }
+    std::ofstream per_column_csv_out("csv/exp_5_per_column.csv", std::ios::app);
+    if (!per_column_csv_out) {
+      spdlog::error(
+          "Exp5: Nie udało się otworzyć pliku wynikowego "
+          "csv/exp_5_per_column.csv do dopisywania!");
+      return;
+    }
     std::ofstream timings_csv_out("csv/exp_5_timings.csv", std::ios::app);
     if (!timings_csv_out) {
       spdlog::error(
@@ -194,6 +226,41 @@ void runExp5(const std::string& dbPath, size_t dbSizeParam, bool skipDbScan) {
                    << timings.singleCol_sstChecksStats.min << ","
                    << timings.singleCol_sstChecksStats.max << "\n";
 
+    derived_csv_out << params.numRecords << "," << currentItemsPerPartition
+                   << "," << timings.multiCol_nonLeafBloomChecksStats.average << ","
+                   << timings.multiCol_nonLeafBloomChecksStats.min << ","
+                   << timings.multiCol_nonLeafBloomChecksStats.max << ","
+                   << timings.singleCol_nonLeafBloomChecksStats.average << ","
+                   << timings.singleCol_nonLeafBloomChecksStats.min << ","
+                   << timings.singleCol_nonLeafBloomChecksStats.max << "\n";
+
+    per_column_csv_out << params.numRecords << "," << currentItemsPerPartition
+                       << "," << columns.size() << ","
+                       << timings.multiCol_bloomChecksPerColumnStats.average << ","
+                       << timings.multiCol_bloomChecksPerColumnStats.min << ","
+                       << timings.multiCol_bloomChecksPerColumnStats.max << ","
+                       << timings.multiCol_leafBloomChecksPerColumnStats.average << ","
+                       << timings.multiCol_leafBloomChecksPerColumnStats.min << ","
+                       << timings.multiCol_leafBloomChecksPerColumnStats.max << ","
+                       << timings.multiCol_nonLeafBloomChecksPerColumnStats.average << ","
+                       << timings.multiCol_nonLeafBloomChecksPerColumnStats.min << ","
+                       << timings.multiCol_nonLeafBloomChecksPerColumnStats.max << ","
+                       << timings.multiCol_sstChecksPerColumnStats.average << ","
+                       << timings.multiCol_sstChecksPerColumnStats.min << ","
+                       << timings.multiCol_sstChecksPerColumnStats.max << ","
+                       << timings.singleCol_bloomChecksPerColumnStats.average << ","
+                       << timings.singleCol_bloomChecksPerColumnStats.min << ","
+                       << timings.singleCol_bloomChecksPerColumnStats.max << ","
+                       << timings.singleCol_leafBloomChecksPerColumnStats.average << ","
+                       << timings.singleCol_leafBloomChecksPerColumnStats.min << ","
+                       << timings.singleCol_leafBloomChecksPerColumnStats.max << ","
+                       << timings.singleCol_nonLeafBloomChecksPerColumnStats.average << ","
+                       << timings.singleCol_nonLeafBloomChecksPerColumnStats.min << ","
+                       << timings.singleCol_nonLeafBloomChecksPerColumnStats.max << ","
+                       << timings.singleCol_sstChecksPerColumnStats.average << ","
+                       << timings.singleCol_sstChecksPerColumnStats.min << ","
+                       << timings.singleCol_sstChecksPerColumnStats.max << "\n";
+
     timings_csv_out << params.numRecords << "," << currentItemsPerPartition
                     << "," << timings.hierarchicalSingleTimeStats.average << ","
                     << timings.hierarchicalSingleTimeStats.min << ","
@@ -212,9 +279,11 @@ void runExp5(const std::string& dbPath, size_t dbSizeParam, bool skipDbScan) {
         << params.numRecords << "," << currentItemsPerPartition << ","
         << timings.multiCol_bloomChecksStats.average << ","
         << timings.multiCol_leafBloomChecksStats.average << ","
+        << timings.multiCol_nonLeafBloomChecksStats.average << ","
         << timings.multiCol_sstChecksStats.average << ","
         << timings.singleCol_bloomChecksStats.average << ","
         << timings.singleCol_leafBloomChecksStats.average << ","
+        << timings.singleCol_nonLeafBloomChecksStats.average << ","
         << timings.singleCol_sstChecksStats.average << "\n";
 
     // Write pattern-based query results to separate CSV
@@ -229,8 +298,8 @@ void runExp5(const std::string& dbPath, size_t dbSizeParam, bool skipDbScan) {
     if (currentItemsPerPartition == itemsPerPartitionVec[0]) {
       pattern_csv << "NumRecords,ItemsPerPartition,PercentageExisting,HierarchicalSingleTime,"
                      "HierarchicalMultiTime,"
-                  << "MultiBloomChecks,MultiLeafBloomChecks,MultiSSTChecks,"
-                  << "SingleBloomChecks,SingleLeafBloomChecks,SingleSSTChecks\n";
+                  << "MultiBloomChecks,MultiLeafBloomChecks,MultiNonLeafBloomChecks,MultiSSTChecks,"
+                  << "SingleBloomChecks,SingleLeafBloomChecks,SingleNonLeafBloomChecks,SingleSSTChecks\n";
     }
     
     // Write each pattern result as a separate row
@@ -241,9 +310,11 @@ void runExp5(const std::string& dbPath, size_t dbSizeParam, bool skipDbScan) {
                   << result.hierarchicalMultiTime << ","
                   << result.multiCol_bloomChecks << ","
                   << result.multiCol_leafBloomChecks << ","
+                  << result.multiCol_nonLeafBloomChecks << ","
                   << result.multiCol_sstChecks << ","
                   << result.singleCol_bloomChecks << ","
                   << result.singleCol_leafBloomChecks << ","
+                  << result.singleCol_nonLeafBloomChecks << ","
                   << result.singleCol_sstChecks << "\n";
     }
     pattern_csv.close();
@@ -261,8 +332,8 @@ void runExp5(const std::string& dbPath, size_t dbSizeParam, bool skipDbScan) {
       comprehensive_csv << "NumRecords,ItemsPerPartition,RealDataPercentage,TotalQueries,RealQueries,FalseQueries,"
                            "AvgHierarchicalMultiTime,AvgHierarchicalSingleTime,"
                            "AvgRealDataMultiTime,AvgRealDataSingleTime,AvgFalseDataMultiTime,AvgFalseDataSingleTime,"
-                        << "AvgMultiBloomChecks,AvgMultiLeafBloomChecks,AvgMultiSSTChecks,"
-                        << "AvgSingleBloomChecks,AvgSingleLeafBloomChecks,AvgSingleSSTChecks,"
+                        << "AvgMultiBloomChecks,AvgMultiLeafBloomChecks,AvgMultiNonLeafBloomChecks,AvgMultiSSTChecks,"
+                        << "AvgSingleBloomChecks,AvgSingleLeafBloomChecks,AvgSingleNonLeafBloomChecks,AvgSingleSSTChecks,"
                         << "AvgRealMultiBloomChecks,AvgRealMultiSSTChecks,AvgFalseMultiBloomChecks,AvgFalseMultiSSTChecks\n";
     }
     
@@ -275,8 +346,9 @@ void runExp5(const std::string& dbPath, size_t dbSizeParam, bool skipDbScan) {
                         << result.avgRealDataMultiTime << "," << result.avgRealDataSingleTime << ","
                         << result.avgFalseDataMultiTime << "," << result.avgFalseDataSingleTime << ","
                         << result.avgMultiBloomChecks << "," << result.avgMultiLeafBloomChecks << ","
-                        << result.avgMultiSSTChecks << "," << result.avgSingleBloomChecks << ","
-                        << result.avgSingleLeafBloomChecks << "," << result.avgSingleSSTChecks << ","
+                        << result.avgMultiNonLeafBloomChecks << "," << result.avgMultiSSTChecks << ","
+                        << result.avgSingleBloomChecks << "," << result.avgSingleLeafBloomChecks << ","
+                        << result.avgSingleNonLeafBloomChecks << "," << result.avgSingleSSTChecks << ","
                         << result.avgRealMultiBloomChecks << "," << result.avgRealMultiSSTChecks << ","
                         << result.avgFalseMultiBloomChecks << "," << result.avgFalseMultiSSTChecks << "\n";
     }
@@ -285,6 +357,8 @@ void runExp5(const std::string& dbPath, size_t dbSizeParam, bool skipDbScan) {
     dbManager.closeDB();
     bloom_metrics_2_csv_out.close();
     checks_csv_out.close();
+    derived_csv_out.close();
+    per_column_csv_out.close();
     timings_csv_out.close();
     overview_csv_out.close();
     selected_avg_checks_csv_out.close();

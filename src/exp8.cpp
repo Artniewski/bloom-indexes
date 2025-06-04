@@ -52,6 +52,33 @@ void runExp8(std::string baseDir, bool initMode, bool skipDbScan) {
 
   out.close();
 
+  // Initialize derived metrics CSV
+  std::ofstream derived_out("csv/exp_8_derived_metrics.csv", std::ios::app);
+  if (!derived_out) {
+    spdlog::error("ExpBloomMetrics: Nie udało się otworzyć pliku derived metrics CSV!");
+    return;
+  }
+
+  derived_out << "NumRecords,NumColumns,GlobalScanTime,HierarchicalSingleTime,"
+                 "HierarchicalMultiTime,"
+              << "MultiNonLeafBloomChecks,SingleNonLeafBloomChecks\n";
+
+  derived_out.close();
+
+  // Initialize per-column metrics CSV
+  std::ofstream per_column_out("csv/exp_8_per_column_metrics.csv", std::ios::app);
+  if (!per_column_out) {
+    spdlog::error("ExpBloomMetrics: Nie udało się otworzyć pliku per column metrics CSV!");
+    return;
+  }
+
+  per_column_out << "NumRecords,NumColumns,GlobalScanTime,HierarchicalSingleTime,"
+                    "HierarchicalMultiTime,"
+                 << "MultiBloomChecksPerColumn,MultiLeafBloomChecksPerColumn,MultiNonLeafBloomChecksPerColumn,MultiSSTChecksPerColumn,"
+                 << "SingleBloomChecksPerColumn,SingleLeafBloomChecksPerColumn,SingleNonLeafBloomChecksPerColumn,SingleSSTChecksPerColumn\n";
+
+  per_column_out.close();
+
   // Initialize pattern metrics CSV
   std::ofstream pattern_out("csv/exp_8_false_query.csv", std::ios::app);
   if (!pattern_out) {
@@ -77,9 +104,12 @@ void runExp8(std::string baseDir, bool initMode, bool skipDbScan) {
   comprehensive_out << "NumRecords,NumColumns,RealDataPercentage,TotalQueries,RealQueries,FalseQueries,"
                        "AvgHierarchicalMultiTime,AvgHierarchicalSingleTime,"
                        "AvgRealDataMultiTime,AvgRealDataSingleTime,AvgFalseDataMultiTime,AvgFalseDataSingleTime,"
-                    << "AvgMultiBloomChecks,AvgMultiLeafBloomChecks,AvgMultiSSTChecks,"
-                    << "AvgSingleBloomChecks,AvgSingleLeafBloomChecks,AvgSingleSSTChecks,"
-                    << "AvgRealMultiBloomChecks,AvgRealMultiSSTChecks,AvgFalseMultiBloomChecks,AvgFalseMultiSSTChecks\n";
+                    << "AvgMultiBloomChecks,AvgMultiLeafBloomChecks,AvgMultiNonLeafBloomChecks,AvgMultiSSTChecks,"
+                    << "AvgSingleBloomChecks,AvgSingleLeafBloomChecks,AvgSingleNonLeafBloomChecks,AvgSingleSSTChecks,"
+                    << "AvgMultiBloomChecksPerColumn,AvgMultiLeafBloomChecksPerColumn,AvgMultiNonLeafBloomChecksPerColumn,AvgMultiSSTChecksPerColumn,"
+                    << "AvgSingleBloomChecksPerColumn,AvgSingleLeafBloomChecksPerColumn,AvgSingleNonLeafBloomChecksPerColumn,AvgSingleSSTChecksPerColumn,"
+                    << "AvgRealMultiBloomChecks,AvgRealMultiSSTChecks,AvgFalseMultiBloomChecks,AvgFalseMultiSSTChecks,"
+                    << "AvgRealMultiBloomChecksPerColumn,AvgRealMultiSSTChecksPerColumn,AvgFalseMultiBloomChecksPerColumn,AvgFalseMultiSSTChecksPerColumn\n";
 
   comprehensive_out.close();
 
@@ -176,6 +206,23 @@ void runExp8(std::string baseDir, bool initMode, bool skipDbScan) {
           "ExpBloomMetrics: Nie udało się otworzyć pliku wynikowego!");
       return;
     }
+    
+    // Write derived metrics results to separate CSV
+    std::ofstream derived_csv("csv/exp_8_derived_metrics.csv", std::ios::app);
+    if (!derived_csv) {
+      spdlog::error(
+          "ExpBloomMetrics: Nie udało się otworzyć pliku derived metrics CSV!");
+      return;
+    }
+    
+    // Write per-column metrics results to separate CSV  
+    std::ofstream per_column_csv("csv/exp_8_per_column_metrics.csv", std::ios::app);
+    if (!per_column_csv) {
+      spdlog::error(
+          "ExpBloomMetrics: Nie udało się otworzyć pliku per column metrics CSV!");
+      return;
+    }
+    
     out_csv << params.numRecords << "," << numCol << ","
             << timings.globalScanTimeStats.average << ","
             << timings.hierarchicalSingleTimeStats.average << ","
@@ -187,6 +234,28 @@ void runExp8(std::string baseDir, bool initMode, bool skipDbScan) {
             << timings.singleCol_leafBloomChecksStats.average << ","
             << timings.singleCol_sstChecksStats.average << "\n";
     out_csv.close();
+    
+    derived_csv << params.numRecords << "," << numCol << ","
+                << timings.globalScanTimeStats.average << ","
+                << timings.hierarchicalSingleTimeStats.average << ","
+                << timings.hierarchicalMultiTimeStats.average << ","
+                << timings.multiCol_nonLeafBloomChecksStats.average << ","
+                << timings.singleCol_nonLeafBloomChecksStats.average << "\n";
+    derived_csv.close();
+    
+    per_column_csv << params.numRecords << "," << numCol << ","
+                   << timings.globalScanTimeStats.average << ","
+                   << timings.hierarchicalSingleTimeStats.average << ","
+                   << timings.hierarchicalMultiTimeStats.average << ","
+                   << timings.multiCol_bloomChecksPerColumnStats.average << ","
+                   << timings.multiCol_leafBloomChecksPerColumnStats.average << ","
+                   << timings.multiCol_nonLeafBloomChecksPerColumnStats.average << ","
+                   << timings.multiCol_sstChecksPerColumnStats.average << ","
+                   << timings.singleCol_bloomChecksPerColumnStats.average << ","
+                   << timings.singleCol_leafBloomChecksPerColumnStats.average << ","
+                   << timings.singleCol_nonLeafBloomChecksPerColumnStats.average << ","
+                   << timings.singleCol_sstChecksPerColumnStats.average << "\n";
+    per_column_csv.close();
 
     // Write pattern-based query results to separate CSV
     std::ofstream pattern_csv("csv/exp_8_false_query.csv", std::ios::app);
@@ -229,10 +298,17 @@ void runExp8(std::string baseDir, bool initMode, bool skipDbScan) {
                         << result.avgRealDataMultiTime << "," << result.avgRealDataSingleTime << ","
                         << result.avgFalseDataMultiTime << "," << result.avgFalseDataSingleTime << ","
                         << result.avgMultiBloomChecks << "," << result.avgMultiLeafBloomChecks << ","
-                        << result.avgMultiSSTChecks << "," << result.avgSingleBloomChecks << ","
-                        << result.avgSingleLeafBloomChecks << "," << result.avgSingleSSTChecks << ","
+                        << result.avgMultiNonLeafBloomChecks << "," << result.avgMultiSSTChecks << ","
+                        << result.avgSingleBloomChecks << "," << result.avgSingleLeafBloomChecks << ","
+                        << result.avgSingleNonLeafBloomChecks << "," << result.avgSingleSSTChecks << ","
+                        << result.avgMultiBloomChecksPerColumn << "," << result.avgMultiLeafBloomChecksPerColumn << ","
+                        << result.avgMultiNonLeafBloomChecksPerColumn << "," << result.avgMultiSSTChecksPerColumn << ","
+                        << result.avgSingleBloomChecksPerColumn << "," << result.avgSingleLeafBloomChecksPerColumn << ","
+                        << result.avgSingleNonLeafBloomChecksPerColumn << "," << result.avgSingleSSTChecksPerColumn << ","
                         << result.avgRealMultiBloomChecks << "," << result.avgRealMultiSSTChecks << ","
-                        << result.avgFalseMultiBloomChecks << "," << result.avgFalseMultiSSTChecks << "\n";
+                        << result.avgFalseMultiBloomChecks << "," << result.avgFalseMultiSSTChecks << ","
+                        << result.avgRealMultiBloomChecksPerColumn << "," << result.avgRealMultiSSTChecksPerColumn << ","
+                        << result.avgFalseMultiBloomChecksPerColumn << "," << result.avgFalseMultiSSTChecksPerColumn << "\n";
     }
     comprehensive_csv.close();
 
