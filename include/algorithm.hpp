@@ -109,14 +109,15 @@ inline std::vector<std::string> finalSstScanAndIntersect(
 inline void dfsMultiColumn(const std::vector<std::string>& values,
                            Combo currentCombo, DBManager& dbManager,
                            bool isInitialCall) {
-  // 1) bloom‑filter pruning on this combo
+                            //check roots
+if (isInitialCall) {
   for (size_t i = 0; i < currentCombo.nodes.size(); ++i) {
-    if (isInitialCall) {
-      ++gBloomCheckCount;
-      if (currentCombo.nodes[i]->filename != "Memory") ++gLeafBloomCheckCount;
-    }
-    if (!currentCombo.nodes[i]->bloom.exists(values[i])) return;
+    ++gBloomCheckCount;
+    if (!currentCombo.nodes[i]->bloom.exists(values[i]))
+      return;
   }
+}
+
   // 2) range check
   if (currentCombo.rangeStart > currentCombo.rangeEnd) return;
 
