@@ -909,7 +909,7 @@ std::vector<AccumulatedQueryMetrics> runComprehensiveQueryAnalysis(
   std::vector<AccumulatedQueryMetrics> accumulatedResults;
   
   // Define the real data percentages to test
-  std::vector<double> realDataPercentages = {0.0, 20.0, 33.0, 50.0, 75.0, 100.0};
+  std::vector<double> realDataPercentages = {0.0, 20.0, 40.0, 60.0, 80.0, 100.0};
   
   spdlog::info("runComprehensiveQueryAnalysis: Starting comprehensive analysis with {} queries per scenario", 
                numQueriesPerScenario);
