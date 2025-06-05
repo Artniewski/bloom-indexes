@@ -66,7 +66,8 @@ void writeExp8ScalabilityHeaders() {
 void writeExp8TimingComparisonHeaders() {
   writeCsvHeader("csv/exp_8_timing_comparison.csv",
                  "numRecords,numColumns,realDataPercentage,"
-                 "avgRealMultiTime,avgRealSingleTime,avgFalseMultiTime,avgFalseSingleTime");
+                 "avgRealMultiTime,avgRealSingleTime,avgFalseMultiTime,avgFalseSingleTime,"
+                 "avgHierarchicalMultiTime,avgHierarchicalSingleTime");
 }
 
 void runExp8(std::string baseDir, bool initMode, bool skipDbScan) {
@@ -232,11 +233,12 @@ void runExp8(std::string baseDir, bool initMode, bool skipDbScan) {
                             << result.avgMultiBloomChecksPerColumn << "," << result.avgMultiSSTChecksPerColumn << "\n";
       }
 
-      // Timing comparison (7 columns)
+      // Timing comparison (9 columns)
       if (timing_comparison) {
         timing_comparison << params.numRecords << "," << numCol << "," << result.realDataPercentage << ","
                          << result.avgRealDataMultiTime << "," << result.avgRealDataSingleTime << ","
-                         << result.avgFalseDataMultiTime << "," << result.avgFalseDataSingleTime << "\n";
+                         << result.avgFalseDataMultiTime << "," << result.avgFalseDataSingleTime << ","
+                         << result.avgHierarchicalMultiTime << "," << result.avgHierarchicalSingleTime << "\n";
       }
     }
 

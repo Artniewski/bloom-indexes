@@ -71,7 +71,8 @@ void writeExp1TimingComparisonHeaders() {
   writeCsvHeader("csv/exp_1_timing_comparison.csv",
                  "dbSize,realDataPercentage,"
                  "avgRealMultiTime,avgRealSingleTime,"
-                 "avgFalseMultiTime,avgFalseSingleTime");
+                 "avgFalseMultiTime,avgFalseSingleTime,"
+                 "avgHierarchicalMultiTime,avgHierarchicalSingleTime");
 }
 
 void runExp1(std::string baseDir, bool initMode, std::string sharedDbName,
@@ -236,11 +237,12 @@ void runExp1(std::string baseDir, bool initMode, std::string sharedDbName,
                            << result.avgMultiBloomChecks << "," << result.avgMultiSSTChecks << "\n";
       }
 
-      // Timing comparison (6 columns)
+      // Timing comparison (8 columns)
       if (timing_comparison) {
         timing_comparison << dbSize << "," << result.realDataPercentage << ","
                          << result.avgRealDataMultiTime << "," << result.avgRealDataSingleTime << ","
-                         << result.avgFalseDataMultiTime << "," << result.avgFalseDataSingleTime << "\n";
+                         << result.avgFalseDataMultiTime << "," << result.avgFalseDataSingleTime << ","
+                         << result.avgHierarchicalMultiTime << "," << result.avgHierarchicalSingleTime << "\n";
       }
 
       // Comprehensive checks (14 columns)

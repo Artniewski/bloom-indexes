@@ -66,7 +66,8 @@ void writeExp5PartitionEfficiencyHeaders() {
 void writeExp5TimingComparisonHeaders() {
   writeCsvHeader("csv/exp_5_timing_comparison.csv",
                  "numRecords,itemsPerPartition,realDataPercentage,"
-                 "avgRealMultiTime,avgRealSingleTime,avgFalseMultiTime,avgFalseSingleTime");
+                 "avgRealMultiTime,avgRealSingleTime,avgFalseMultiTime,avgFalseSingleTime,"
+                 "avgHierarchicalMultiTime,avgHierarchicalSingleTime");
 }
 
 void runExp5(const std::string& dbPath, size_t dbSizeParam, bool skipDbScan) {
@@ -195,11 +196,12 @@ void runExp5(const std::string& dbPath, size_t dbSizeParam, bool skipDbScan) {
                              << result.avgMultiBloomChecksPerColumn << "," << result.avgMultiSSTChecksPerColumn << "\n";
       }
 
-      // Timing comparison (7 columns)
+      // Timing comparison (9 columns)
       if (timing_comparison) {
         timing_comparison << params.numRecords << "," << currentItemsPerPartition << "," << result.realDataPercentage << ","
                          << result.avgRealDataMultiTime << "," << result.avgRealDataSingleTime << ","
-                         << result.avgFalseDataMultiTime << "," << result.avgFalseDataSingleTime << "\n";
+                         << result.avgFalseDataMultiTime << "," << result.avgFalseDataSingleTime << ","
+                         << result.avgHierarchicalMultiTime << "," << result.avgHierarchicalSingleTime << "\n";
       }
     }
 

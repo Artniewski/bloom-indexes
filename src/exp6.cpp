@@ -66,7 +66,8 @@ void writeExp6SizeEfficiencyHeaders() {
 void writeExp6TimingComparisonHeaders() {
   writeCsvHeader("csv/exp_6_timing_comparison.csv",
                  "numRecords,bloomSize,realDataPercentage,"
-                 "avgRealMultiTime,avgRealSingleTime,avgFalseMultiTime,avgFalseSingleTime");
+                 "avgRealMultiTime,avgRealSingleTime,avgFalseMultiTime,avgFalseSingleTime,"
+                 "avgHierarchicalMultiTime,avgHierarchicalSingleTime");
 }
 
 void runExp6(const std::string& dbPath, size_t dbSize, bool skipDbScan) {
@@ -186,11 +187,12 @@ void runExp6(const std::string& dbPath, size_t dbSize, bool skipDbScan) {
                         << result.avgMultiBloomChecksPerColumn << "," << result.avgMultiSSTChecksPerColumn << "\n";
       }
 
-      // Timing comparison (7 columns)
+      // Timing comparison (9 columns)
       if (timing_comparison) {
         timing_comparison << dbSize << "," << bloomSize << "," << result.realDataPercentage << ","
                          << result.avgRealDataMultiTime << "," << result.avgRealDataSingleTime << ","
-                         << result.avgFalseDataMultiTime << "," << result.avgFalseDataSingleTime << "\n";
+                         << result.avgFalseDataMultiTime << "," << result.avgFalseDataSingleTime << ","
+                         << result.avgHierarchicalMultiTime << "," << result.avgHierarchicalSingleTime << "\n";
       }
     }
 
