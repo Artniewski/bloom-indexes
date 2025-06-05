@@ -1,6 +1,6 @@
 #pragma once
 
-#include <spdlog/spdlog.h>
+// #include <spdlog/spdlog.h>
 
 #include <algorithm>
 #include <atomic>
@@ -208,13 +208,13 @@ inline std::vector<std::string> multiColumnQueryHierarchical(
     std::vector<BloomTree>& trees, const std::vector<std::string>& values,
     const std::string& globalStart, const std::string& globalEnd,
     DBManager& dbManager) {
-  StopWatch sw;
-  sw.start();
+  // StopWatch sw;
+  // sw.start();
   size_t n = trees.size();
   if (n == 0 || n != values.size()) {
     std::cerr
         << "Error: Number of trees and values must match and be non-empty.\n";
-    sw.stop();
+    // sw.stop();
     return {};
   }
 
@@ -237,14 +237,14 @@ inline std::vector<std::string> multiColumnQueryHierarchical(
   globalfinalMatches.clear();
   dfsMultiColumn(values, start, dbManager, true);
 
-  sw.stop();
-  spdlog::critical(
-      "Multi-column query with SST scan took {} µs, found matching {} keys.",
-      sw.elapsedMicros(), globalfinalMatches.size());
-  spdlog::info(
-      "Bloom filters checked: {} (total), {} (leaves only), SSTables checked: "
-      "{}",
-      gBloomCheckCount.load(), gLeafBloomCheckCount.load(),
-      gSSTCheckCount.load());
+  // sw.stop();
+  // spdlog::critical(
+      // "Multi-column query with SST scan took {} µs, found matching {} keys.",
+      // sw.elapsedMicros(), globalfinalMatches.size());
+  // spdlog::info(
+      // "Bloom filters checked: {} (total), {} (leaves only), SSTables checked: "
+      // "{}",
+      // gBloomCheckCount.load(), gLeafBloomCheckCount.load(),
+      // gSSTCheckCount.load());
   return globalfinalMatches;
 }

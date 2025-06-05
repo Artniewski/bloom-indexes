@@ -706,12 +706,12 @@ std::vector<MixedQueryResult> runMixedQueriesWithCsvData(
     double percentageExisting = static_cast<double>(existingCount) / columns.size() * 100.0;
 
     if (useRealData) {
-      spdlog::info("Query {}: Using REAL data (all true pattern) with ID {}", 
-                   queryIdx + 1, randomId);
+      // spdlog::info("Query {}: Using REAL data (all true pattern) with ID {}", 
+                  //  queryIdx + 1, randomId);
     } else {
       size_t patternIndex = queryIdx % (patterns.size() - 1);
-      spdlog::info("Query {}: Using FALSE data (pattern {} - {}% existing) with ID {}", 
-                   queryIdx + 1, patternIndex, percentageExisting, randomId);
+      // spdlog::info("Query {}: Using FALSE data (pattern {} - {}% existing) with ID {}", 
+                  //  queryIdx + 1, patternIndex, percentageExisting, randomId);
     }
 
     // Generate values based on pattern

@@ -532,8 +532,8 @@ std::vector<std::string> DBManager::findUsingSingleHierarchy(
         "Number of columns and values must be equal and non-empty.");
   }
 
-  StopWatch sw;
-  sw.start();
+  // StopWatch sw;
+  // sw.start();
 
   std::vector<const Node*> candidates = hierarchy.queryNodes(values[0], "", "");
   if (candidates.empty()) {
@@ -548,10 +548,10 @@ std::vector<std::string> DBManager::findUsingSingleHierarchy(
   gSSTCheckCount.store(0);
   gSSTCheckCount += candidates.size();  // Increment by the number of SST files
                                         // we are about to process.
-  spdlog::info(
-      "SSTables to check based on hierarchy for primary column: {}, current "
-      "total checked: {}",
-      candidates.size(), gSSTCheckCount.load());
+  // spdlog::info(
+  //     "SSTables to check based on hierarchy for primary column: {}, current "
+  //     "total checked: {}",
+  //     candidates.size(), gSSTCheckCount.load());
 
   std::vector<std::future<std::vector<std::string>>> sst_scan_futures;
   sst_scan_futures.reserve(candidates.size());
@@ -594,14 +594,14 @@ std::vector<std::string> DBManager::findUsingSingleHierarchy(
     }
   }
 
-  spdlog::info("Total keys collected from primary column scan: {}",
-               allKeys.size());
+  // spdlog::info("Total keys collected from primary column scan: {}",
+  //              allKeys.size());
 
   std::vector<std::future<std::string>> futures;
   futures.reserve(allKeys.size());  // Reserve space for futures
 
   for (const auto& key : allKeys) {
-    spdlog::info("Checking key: {}", key.substr(0, 30));
+    // spdlog::info("Checking key: {}", key.substr(0, 30));
     std::promise<std::string> promise;
     futures.emplace_back(promise.get_future());
 
@@ -667,14 +667,14 @@ std::vector<std::string> DBManager::findUsingSingleHierarchy(
     }
   }
 
-  sw.stop();
-  spdlog::critical("Single hierarchy check took {} µs, found {} matching keys.",
-                   sw.elapsedMicros(), matchingKeys.size());
-  spdlog::info(
-      "Bloom filters checked: {} (total), {} (leaves only), SSTables checked: "
-      "{}",
-      gBloomCheckCount.load(), gLeafBloomCheckCount.load(),
-      gSSTCheckCount.load());
+  // sw.stop();
+  // spdlog::critical("Single hierarchy check took {} µs, found {} matching keys.",
+  //                  sw.elapsedMicros(), matchingKeys.size());
+  // spdlog::info(
+  //     "Bloom filters checked: {} (total), {} (leaves only), SSTables checked: "
+  //     "{}",
+  //     gBloomCheckCount.load(), gLeafBloomCheckCount.load(),
+  //     gSSTCheckCount.load());
   return matchingKeys;
 }
 
