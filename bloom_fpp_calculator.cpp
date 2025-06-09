@@ -1,5 +1,5 @@
-#include <cmath>    // For std::exp and std::pow
-#include <iomanip>  // For std::setw, std::fixed, std::setprecision
+#include <cmath>    
+#include <iomanip> 
 #include <iostream>
 #include <string>
 #include <vector>
@@ -7,7 +7,6 @@
 // Function to calculate the False Positive Probability (FPP) of a Bloom filter
 double calculate_bloom_fpp(long long n_items, long long m_bits, int k_hashes) {
   // Using the formula: p = (1 - e^(-k*n/m))^k
-  // Ensure floating point division
   double exponent =
       -(static_cast<double>(k_hashes) * static_cast<double>(n_items)) /
       static_cast<double>(m_bits);
@@ -27,7 +26,7 @@ void run_parameter_sweep() {
       20000, 50000, 150000, 100000, 200000, 500000, 1000000};
   std::vector<int> bits_per_item_range = {
       1, 2,  3,  4,  5,  6,  7,  8,
-      9, 10, 11, 12, 13, 14, 15, 16};  // This will be used to calculate m_bits
+      9, 10, 11, 12, 13, 14, 15, 16};
   std::vector<int> num_hash_functions_range = {1, 2,  3,  4,  5,  6,  7,  8,
                                                9, 10, 11, 12, 13, 14, 15, 16};
 
@@ -38,7 +37,6 @@ void run_parameter_sweep() {
       for (int k_hashes : num_hash_functions_range) {
         double fpp = 0.0;
         fpp = calculate_bloom_fpp(n_items, m_bits, k_hashes);
-        // Output CSV row
         std::cout << n_items << "," << bits_per_item << "," << m_bits << ","
                   << k_hashes << "," << std::fixed << std::setprecision(8)
                   << fpp << std::endl;
